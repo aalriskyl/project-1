@@ -7,6 +7,7 @@ import type { UserRole } from '@/types/app.ts';
 export interface UserEntity {
   readonly id: string;
   readonly email: string;
+  readonly phone: string | null;
   readonly displayName: string;
   readonly role: UserRole;
   readonly createdAt: Date;
@@ -14,13 +15,19 @@ export interface UserEntity {
 }
 
 export interface UserWithCredentials extends UserEntity {
-  readonly passwordHash: string;
+  readonly passwordHash: string | null;
+  readonly googleSub: string | null;
+}
+
+export interface UpdateUserProfilePatch {
+  readonly displayName?: string;
+  readonly phone?: string | null;
 }
 
 export interface UsersRepository {
   findById(id: string): Promise<UserEntity | null>;
   findByEmailWithCredentials(email: string): Promise<UserWithCredentials | null>;
-  updateDisplayName(id: string, displayName: string): Promise<UserEntity | null>;
+  updateProfile(id: string, patch: UpdateUserProfilePatch): Promise<UserEntity | null>;
   listCursor(params: {
     readonly limit: number;
     readonly cursor?: DecodedCursor;
@@ -34,6 +41,7 @@ function normalizeRole(rawRole: string): UserRole {
 function toUserEntity(row: {
   id: string;
   email: string;
+  phone: string | null;
   displayName: string;
   role: string;
   createdAt: Date;
@@ -42,6 +50,7 @@ function toUserEntity(row: {
   return {
     id: row.id,
     email: row.email,
+    phone: row.phone,
     displayName: row.displayName,
     role: normalizeRole(row.role),
     createdAt: row.createdAt,
@@ -53,6 +62,7 @@ export function createUsersRepository(db: Database): UsersRepository {
   const publicColumns = {
     id: users.id,
     email: users.email,
+    phone: users.phone,
     displayName: users.displayName,
     role: users.role,
     createdAt: users.createdAt,
@@ -71,6 +81,7 @@ export function createUsersRepository(db: Database): UsersRepository {
         .select({
           ...publicColumns,
           passwordHash: users.passwordHash,
+          googleSub: users.googleSub,
         })
         .from(users)
         .where(eq(users.email, normalizedEmail))
@@ -83,14 +94,16 @@ export function createUsersRepository(db: Database): UsersRepository {
       return {
         ...toUserEntity(row),
         passwordHash: row.passwordHash,
+        googleSub: row.googleSub,
       };
     },
 
-    async updateDisplayName(id: string, displayName: string): Promise<UserEntity | null> {
+    async updateProfile(id: string, patch: UpdateUserProfilePatch): Promise<UserEntity | null> {
       const [updated] = await db
         .update(users)
         .set({
-          displayName,
+          ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+          ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
           updatedAt: new Date(),
         })
         .where(eq(users.id, id))

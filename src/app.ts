@@ -7,18 +7,32 @@ import { timeout } from 'hono/timeout';
 import { env } from '@/config/env.ts';
 import { checkDbReadiness, db } from '@/db/client.ts';
 import { defaultOpenApiHook, ErrorResponseSchema, ServiceUnavailableError } from '@/lib/errors.ts';
-import { requireAuth } from '@/middlewares/auth.ts';
 import { errorHandler, notFoundHandler } from '@/middlewares/error-handler.ts';
 import { requestLoggerMiddleware } from '@/middlewares/logger.ts';
 import { createRateLimiter, type RateLimitStore } from '@/middlewares/rate-limit.ts';
 import { requestIdMiddleware } from '@/middlewares/request-id.ts';
+import { createArticlesRepository } from '@/modules/articles/articles.repository.ts';
+import {
+  type ArticlesService,
+  createArticlesService,
+} from '@/modules/articles/articles.service.ts';
 import { createAuthRepository } from '@/modules/auth/auth.repository.ts';
-import { createAuthRoutes } from '@/modules/auth/auth.routes.ts';
 import { type AuthService, createAuthService } from '@/modules/auth/auth.service.ts';
+import { createCatalogRepository } from '@/modules/catalog/catalog.repository.ts';
+import { type CatalogService, createCatalogService } from '@/modules/catalog/catalog.service.ts';
+import { createMediaRepository } from '@/modules/media/media.repository.ts';
+import { createMediaService, type MediaService } from '@/modules/media/media.service.ts';
+import { createProductsRepository } from '@/modules/products/products.repository.ts';
+import {
+  createProductsService,
+  type ProductsService,
+} from '@/modules/products/products.service.ts';
+import { createReviewsRepository } from '@/modules/reviews/reviews.repository.ts';
+import { createReviewsService, type ReviewsService } from '@/modules/reviews/reviews.service.ts';
 import { createUsersRepository } from '@/modules/users/users.repository.ts';
-import { createUsersRoutes } from '@/modules/users/users.routes.ts';
 import { createUsersService, type UsersService } from '@/modules/users/users.service.ts';
 import type { AppEnv } from '@/types/app.ts';
+import { createV1Routes } from '@/v1/routes.ts';
 
 const HealthResponseSchema = z
   .object({
@@ -60,6 +74,11 @@ const readyRoute = createRoute({
 export interface AppDependencies {
   readonly authService?: AuthService;
   readonly usersService?: UsersService;
+  readonly catalogService?: CatalogService;
+  readonly productsService?: ProductsService;
+  readonly reviewsService?: ReviewsService;
+  readonly articlesService?: ArticlesService;
+  readonly mediaService?: MediaService;
   readonly authMiddleware?: MiddlewareHandler<AppEnv>;
   readonly checkReadiness?: () => Promise<boolean>;
   readonly rateLimitStore?: RateLimitStore;
@@ -72,8 +91,21 @@ export interface AppDependencies {
 export function createApp(deps: AppDependencies = {}) {
   const application = new OpenAPIHono<AppEnv>({ defaultHook: defaultOpenApiHook });
 
+  const catalogRepo = createCatalogRepository(db);
+  const productsRepo = createProductsRepository(db);
+
   const authService = deps.authService ?? createAuthService(createAuthRepository(db));
   const usersService = deps.usersService ?? createUsersService(createUsersRepository(db));
+  const catalogService = deps.catalogService ?? createCatalogService(catalogRepo);
+  const productsService = deps.productsService ?? createProductsService(productsRepo, catalogRepo);
+  const reviewsService =
+    deps.reviewsService ?? createReviewsService(createReviewsRepository(db), productsRepo);
+  const articlesService =
+    deps.articlesService ??
+    createArticlesService(createArticlesRepository(db), {
+      resolveRelatedProducts: (ids) => productsService.resolveRelatedProductCards(ids),
+    });
+  const mediaService = deps.mediaService ?? createMediaService(createMediaRepository(db));
   const checkReadiness = deps.checkReadiness ?? (() => checkDbReadiness(db));
   const windowMs = deps.rateLimitWindowMs ?? env.RATE_LIMIT_WINDOW_MS;
 
@@ -102,6 +134,7 @@ export function createApp(deps: AppDependencies = {}) {
       allowHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key'],
       exposeHeaders: [
         'X-Request-Id',
+        'ETag',
         'RateLimit-Limit',
         'RateLimit-Remaining',
         'RateLimit-Reset',
@@ -130,13 +163,24 @@ export function createApp(deps: AppDependencies = {}) {
     }),
   );
 
-  application.use('/v1/*', globalRateLimiter);
-
   application.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
     type: 'http',
     scheme: 'bearer',
     bearerFormat: 'JWT',
     description: 'Short-lived HS256 JWT access token issued by /v1/auth/login or /v1/auth/refresh',
+  });
+
+  const v1Routes = createV1Routes({
+    authService,
+    usersService,
+    catalogService,
+    productsService,
+    reviewsService,
+    articlesService,
+    mediaService,
+    globalRateLimiter,
+    authRateLimiter,
+    ...(deps.authMiddleware !== undefined ? { authMiddleware: deps.authMiddleware } : {}),
   });
 
   const routes = application
@@ -162,8 +206,7 @@ export function createApp(deps: AppDependencies = {}) {
         200,
       );
     })
-    .route('/v1/auth', createAuthRoutes(authService, authRateLimiter))
-    .route('/v1/users', createUsersRoutes(usersService, deps.authMiddleware ?? requireAuth))
+    .route('/v1', v1Routes)
     .doc31('/v1/openapi.json', {
       openapi: '3.1.0',
       info: {

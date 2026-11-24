@@ -131,7 +131,7 @@ describe('Users HTTP routes (/v1/users)', () => {
     expect(badIssuerRes.status).toBe(401);
   });
 
-  test('supports GET /me, PATCH /me (strict body), IDOR 403 on /{id}, and cursor pagination', async () => {
+  test('supports GET /me, PATCH /me (displayName & E.164 phone), IDOR 403 on /{id}, and cursor pagination', async () => {
     const { testApp, user1, user2, user1Token, adminToken } = await setupFixture();
 
     const meRes = await testApp.request('/v1/users/me', {
@@ -149,17 +149,38 @@ describe('Users HTTP routes (/v1/users)', () => {
     });
     expect(extraFieldPatch.status).toBe(422);
 
+    const badPhonePatch = await testApp.request('/v1/users/me', {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${user1Token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ phone: '08123456' }),
+    });
+    expect(badPhonePatch.status).toBe(422);
+
+    const emptyPatch = await testApp.request('/v1/users/me', {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${user1Token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    expect(emptyPatch.status).toBe(422);
+
     const validPatch = await testApp.request('/v1/users/me', {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${user1Token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ displayName: 'User One Updated' }),
+      body: JSON.stringify({ displayName: 'User One Updated', phone: '+6281299998888' }),
     });
     expect(validPatch.status).toBe(200);
     const patchedBody = UserEnvelopeSchema.parse(await validPatch.json());
     expect(patchedBody.data.displayName).toBe('User One Updated');
+    expect(patchedBody.data.phone).toBe('+6281299998888');
 
     const idorRes = await testApp.request(`/v1/users/${user2.id}`, {
       headers: { Authorization: `Bearer ${user1Token}` },
@@ -193,7 +214,6 @@ describe('Users HTTP routes (/v1/users)', () => {
     expect(page2.data[0]?.id).toBe(user1.id);
     expect(page2.meta.hasMore).toBe(false);
 
-    // Enforce max page size (100) and cursor validation
     const overLimitRes = await testApp.request('/v1/users?limit=500', {
       headers: { Authorization: `Bearer ${adminToken}` },
     });

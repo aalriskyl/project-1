@@ -32,6 +32,8 @@ Use a feature-based modular structure with clear layer boundaries:
 src/
   app.ts                 # Hono app composition (no listen)
   index.ts               # Bun.serve entry point
+  v1/
+    routes.ts            # Central /v1 router aggregator
   config/
     env.ts               # Zod-validated env, fail fast on boot
   modules/

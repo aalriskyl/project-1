@@ -1,0 +1,33 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/categories'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "name": "Genset Silent",
+      "description": "Industrial silent diesel generator sets 10-500 kVA.",
+      "metaTitle": "Jual Genset Silent 10-500 kVA | Tsuzumi Japan",
+      "specSchema": [
+        {
+          "key": "rated_power_kva",
+          "label": "Rated Power",
+          "unit": "kVA",
+          "type": "number",
+          "sortOrder": 10
+        },
+        {
+          "key": "voltage",
+          "label": "Voltage",
+          "unit": "V",
+          "type": "text",
+          "sortOrder": 20
+        }
+      ],
+      "sortOrder": 10,
+      "isActive": true
+    }

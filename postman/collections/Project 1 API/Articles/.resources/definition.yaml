@@ -1,0 +1,6 @@
+$kind: collection
+name: Articles
+description: Public SEO Markdown articles with cursor pagination, tag filtering, and related product/article hydration.
+order: 5000
+auth:
+  type: noauth

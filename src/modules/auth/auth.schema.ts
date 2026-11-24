@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import { UserSchema } from '@/modules/users/users.schema.ts';
+import { PhoneE164Schema, UserSchema } from '@/modules/users/users.schema.ts';
 
 export const RegisterBodySchema = z
   .strictObject({
@@ -14,6 +14,7 @@ export const RegisterBodySchema = z
       .max(128, 'Password must be at most 128 characters')
       .openapi({ example: 'correct-horse-battery-staple' }),
     displayName: z.string().trim().min(1).max(120).openapi({ example: 'Ada Lovelace' }),
+    phone: PhoneE164Schema.optional().openapi({ example: '+6281234567890' }),
   })
   .openapi('RegisterBody');
 
@@ -31,6 +32,40 @@ export const LoginBodySchema = z
   .openapi('LoginBody');
 
 export type LoginBody = z.infer<typeof LoginBodySchema>;
+
+export const GoogleLoginBodySchema = z
+  .strictObject({
+    idToken: z.string().trim().min(20).max(4096).openapi({
+      description: 'Google Sign-In OpenID Connect ID token verified via Google JWKS',
+    }),
+  })
+  .openapi('GoogleLoginBody');
+
+export type GoogleLoginBody = z.infer<typeof GoogleLoginBodySchema>;
+
+export const ForgotPasswordBodySchema = z
+  .strictObject({
+    email: z
+      .email()
+      .max(255)
+      .transform((value) => value.trim().toLowerCase())
+      .openapi({ example: 'ada@example.com' }),
+  })
+  .openapi('ForgotPasswordBody');
+
+export type ForgotPasswordBody = z.infer<typeof ForgotPasswordBodySchema>;
+
+export const ResetPasswordBodySchema = z
+  .strictObject({
+    token: z.string().trim().min(20).max(256),
+    newPassword: z
+      .string()
+      .min(12, 'Password must be at least 12 characters')
+      .max(128, 'Password must be at most 128 characters'),
+  })
+  .openapi('ResetPasswordBody');
+
+export type ResetPasswordBody = z.infer<typeof ResetPasswordBodySchema>;
 
 export const RefreshBodySchema = z
   .strictObject({
@@ -70,3 +105,11 @@ export const AuthSessionEnvelopeSchema = z
     data: AuthSessionSchema,
   })
   .openapi('AuthSessionEnvelope');
+
+export const ForgotPasswordEnvelopeSchema = z
+  .object({
+    data: z.object({
+      message: z.string(),
+    }),
+  })
+  .openapi('ForgotPasswordEnvelope');

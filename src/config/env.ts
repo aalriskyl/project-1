@@ -63,6 +63,19 @@ const EnvSchema = z.object({
   JWT_AUDIENCE: z.string().min(1).default('project-1-client'),
   JWT_ACCESS_TTL_SEC: z.coerce.number().int().min(60).max(86_400).default(900),
   REFRESH_TOKEN_TTL_SEC: z.coerce.number().int().min(300).max(2_592_000).default(604_800),
+
+  NEXTJS_REVALIDATE_URL: z.url().optional(),
+  NEXTJS_REVALIDATE_SECRET: z.string().min(16).optional(),
+
+  SUPABASE_URL: z.url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+  SUPABASE_STORAGE_BUCKET: z.string().min(1).max(63).default('public-assets'),
+
+  GOOGLE_OAUTH_CLIENT_ID: z.string().min(10).optional(),
+  RESEND_API_KEY: z.string().min(10).optional(),
+  MAIL_FROM: z.string().min(3).max(160).default('Tsuzumi Japan <no-reply@tsuzumijapan.com>'),
+  APP_PUBLIC_URL: z.url().default('http://localhost:3001'),
+  PASSWORD_RESET_TTL_SEC: z.coerce.number().int().min(300).max(86_400).default(1_800),
 });
 
 export type Env = Omit<z.infer<typeof EnvSchema>, 'LOG_LEVEL'> & {

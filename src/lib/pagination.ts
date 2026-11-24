@@ -4,6 +4,10 @@ import { ValidationError } from '@/lib/errors.ts';
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 
+export const QueryBooleanSchema = z
+  .enum(['true', 'false', '1', '0'])
+  .transform((val) => val === 'true' || val === '1');
+
 export const CursorPaginationQuerySchema = z.object({
   cursor: z
     .string()

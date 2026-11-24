@@ -9,7 +9,8 @@ body:
   type: json
   content: |-
     {
-      "displayName": "Ada Byron"
+      "displayName": "Ada Byron",
+      "phone": "+6281234567890"
     }
 scripts:
   - type: afterResponse

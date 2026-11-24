@@ -1,0 +1,32 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/products'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryId": "01936c8e-7f2a-7000-8000-000000000101",
+      "brandSlug": "perkins",
+      "name": "Genset 30 kVA Silent Diesel Tsuzumi TPG30",
+      "sku": "TPG30-SILENT",
+      "priceIdr": 177500000,
+      "requiresQuote": true,
+      "stock": 2,
+      "isFeatured": true,
+      "weightKg": 920.5,
+      "media": [
+        {
+          "type": "image",
+          "url": "{{uploadedPublicUrl}}",
+          "altText": "Genset 30 kVA Silent Tsuzumi TPG30"
+        }
+      ],
+      "specs": {
+        "rated_power_kva": 30,
+        "voltage": "220/380V"
+      }
+    }

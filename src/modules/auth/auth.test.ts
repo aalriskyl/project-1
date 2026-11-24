@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
 import { ConflictError, ErrorResponseSchema, UnauthorizedError } from '@/lib/errors.ts';
+import type { GoogleTokenVerifier } from '@/lib/google-oauth.ts';
+import type { PasswordResetEmailInput } from '@/lib/mailer.ts';
 import { AuthSessionEnvelopeSchema } from '@/modules/auth/auth.schema.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { createUsersService } from '@/modules/users/users.service.ts';
@@ -23,7 +25,7 @@ describe('AuthService (unit)', () => {
     const stored = await store.authRepo.findUserByEmailWithCredentials('ada@example.com');
     expect(stored).not.toBeNull();
     expect(stored?.passwordHash).not.toBe('correct-horse-battery-staple');
-    expect(stored?.passwordHash.startsWith('$argon2id$')).toBe(true);
+    expect(stored?.passwordHash?.startsWith('$argon2id$')).toBe(true);
 
     const rotated = await service.refresh({
       refreshToken: initial.tokens.refreshToken,
@@ -90,19 +92,60 @@ describe('AuthService (unit)', () => {
   });
 });
 
-describe('Auth HTTP routes (/v1/auth)', () => {
-  function setupTestApp(authRateLimitMax: number = 20) {
+describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, refresh, logout)', () => {
+  function setupTestApp(authRateLimitMax: number = 30) {
     const store = createInMemoryDatastore();
-    return createApp({
-      authService: createAuthService(store.authRepo),
+    const sentEmails: PasswordResetEmailInput[] = [];
+
+    const mockGoogleVerifier: GoogleTokenVerifier = {
+      verifyIdToken(idToken) {
+        if (idToken === 'valid-google-token-new-user') {
+          return Promise.resolve({
+            sub: 'google-sub-1001',
+            email: 'ken@example.com',
+            displayName: 'Ken Thompson',
+          });
+        }
+        if (idToken === 'valid-google-token-existing-ada') {
+          return Promise.resolve({
+            sub: 'google-sub-ada-1',
+            email: 'ada@example.com',
+            displayName: 'Ada Lovelace',
+          });
+        }
+        if (idToken === 'valid-google-token-different-sub-ada') {
+          return Promise.resolve({
+            sub: 'google-sub-ada-impostor',
+            email: 'ada@example.com',
+            displayName: 'Other Sub',
+          });
+        }
+        return Promise.reject(
+          new UnauthorizedError('Invalid Google token', 'INVALID_GOOGLE_TOKEN'),
+        );
+      },
+    };
+
+    const testApp = createApp({
+      authService: createAuthService(store.authRepo, {
+        googleVerifier: mockGoogleVerifier,
+        mailer: {
+          sendPasswordResetEmail(input) {
+            sentEmails.push(input);
+            return Promise.resolve();
+          },
+        },
+      }),
       usersService: createUsersService(store.usersRepo),
       checkReadiness: () => Promise.resolve(true),
       authRateLimitMax,
     });
+
+    return { testApp, sentEmails };
   }
 
-  test('POST /v1/auth/register, /login, /refresh, /logout full lifecycle', async () => {
-    const testApp = setupTestApp();
+  test('POST /register, /login, /google account linking, /forgot-password + /reset-password session revocation, and /logout', async () => {
+    const { testApp, sentEmails } = setupTestApp();
 
     const registerRes = await testApp.request('/v1/auth/register', {
       method: 'POST',
@@ -111,55 +154,110 @@ describe('Auth HTTP routes (/v1/auth)', () => {
         email: 'Ada@Example.com',
         password: 'correct-horse-battery-staple',
         displayName: 'Ada Lovelace',
+        phone: '+6281234567890',
       }),
     });
 
     expect(registerRes.status).toBe(201);
     const registerJson = AuthSessionEnvelopeSchema.parse(await registerRes.json());
     expect(registerJson.data.user.email).toBe('ada@example.com');
+    expect(registerJson.data.user.phone).toBe('+6281234567890');
 
-    const duplicateRes = await testApp.request('/v1/auth/register', {
+    // Google Sign-In creates a Google-only account and blocks password login on it
+    const googleNewRes = await testApp.request('/v1/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'valid-google-token-new-user' }),
+    });
+    expect(googleNewRes.status).toBe(200);
+    const googleNew = AuthSessionEnvelopeSchema.parse(await googleNewRes.json());
+    expect(googleNew.data.user.email).toBe('ken@example.com');
+
+    const pwLoginOnGoogleOnly = await testApp.request('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'ken@example.com', password: 'any-password-12345' }),
+    });
+    expect(pwLoginOnGoogleOnly.status).toBe(401);
+
+    // Google Sign-In links to existing email account, and blocks conflicting sub
+    const googleLinkRes = await testApp.request('/v1/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'valid-google-token-existing-ada' }),
+    });
+    expect(googleLinkRes.status).toBe(200);
+
+    const googleMismatchRes = await testApp.request('/v1/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'valid-google-token-different-sub-ada' }),
+    });
+    expect(googleMismatchRes.status).toBe(409);
+
+    // Forgot password -> Reset password revokes Ada's active refresh token & is single-use
+    const forgotRes = await testApp.request('/v1/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'ada@example.com' }),
+    });
+    expect(forgotRes.status).toBe(202);
+    expect(sentEmails).toHaveLength(1);
+
+    const resetLink = new URL(sentEmails[0]?.resetUrl ?? 'http://localhost');
+    const rawResetToken = resetLink.searchParams.get('token') ?? '';
+
+    const resetRes = await testApp.request('/v1/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: rawResetToken,
+        newPassword: 'brand-new-secure-password-999',
+      }),
+    });
+    expect(resetRes.status).toBe(204);
+
+    // Reusing consumed reset token fails with 401
+    const replayResetRes = await testApp.request('/v1/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: rawResetToken,
+        newPassword: 'another-password-9999',
+      }),
+    });
+    expect(replayResetRes.status).toBe(401);
+
+    // Existing refresh token from before password reset must now be revoked!
+    const refreshOldSessionRes = await testApp.request('/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: registerJson.data.tokens.refreshToken }),
+    });
+    expect(refreshOldSessionRes.status).toBe(401);
+
+    // Login with new password succeeds
+    const newLoginRes = await testApp.request('/v1/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: 'ada@example.com',
-        password: 'correct-horse-battery-staple',
-        displayName: 'Ada Lovelace',
+        password: 'brand-new-secure-password-999',
       }),
     });
-    expect(duplicateRes.status).toBe(409);
-
-    const loginRes = await testApp.request('/v1/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'ada@example.com',
-        password: 'correct-horse-battery-staple',
-      }),
-    });
-    expect(loginRes.status).toBe(200);
+    expect(newLoginRes.status).toBe(200);
+    const newLoginJson = AuthSessionEnvelopeSchema.parse(await newLoginRes.json());
 
     const logoutRes = await testApp.request('/v1/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        refreshToken: registerJson.data.tokens.refreshToken,
-      }),
+      body: JSON.stringify({ refreshToken: newLoginJson.data.tokens.refreshToken }),
     });
     expect(logoutRes.status).toBe(204);
-
-    const refreshAfterLogoutRes = await testApp.request('/v1/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        refreshToken: registerJson.data.tokens.refreshToken,
-      }),
-    });
-    expect(refreshAfterLogoutRes.status).toBe(401);
   });
 
   test('returns 422 on weak password or unknown strict fields and 429 when auth rate limit exceeded', async () => {
-    const testApp = setupTestApp(2);
+    const { testApp } = setupTestApp(2);
 
     const invalidRes = await testApp.request('/v1/auth/register', {
       method: 'POST',

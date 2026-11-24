@@ -1,0 +1,10 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/articles/:slug?includeRelated=true'
+order: 2000
+pathVariables:
+  - key: slug
+    value: cara-memilih-genset-silent-30-kva
+queryParams:
+  - key: includeRelated
+    value: 'true'

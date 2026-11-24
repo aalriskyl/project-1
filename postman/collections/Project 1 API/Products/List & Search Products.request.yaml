@@ -1,0 +1,23 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/products?limit=20'
+order: 1000
+queryParams:
+  - key: limit
+    value: '20'
+  - key: categorySlug
+    value: genset-silent
+    disabled: true
+  - key: brandSlug
+    value: perkins
+    disabled: true
+  - key: q
+    value: TPG30
+    disabled: true
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });

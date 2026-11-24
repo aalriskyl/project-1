@@ -1,0 +1,30 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/products/:id/reviews'
+order: 5500
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{accessToken}}'
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: id
+    value: '01936c8e-7f2a-7000-8000-000000000301'
+    description: Product UUIDv7
+body:
+  type: json
+  content: |-
+    {
+      "rating": 5,
+      "comment": "Mesin halus, pengiriman tepat waktu, dan purna jual responsif."
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });

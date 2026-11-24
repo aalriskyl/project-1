@@ -8,6 +8,27 @@
       "when": 1795502608701,
       "tag": "0000_stormy_misty_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795509352501,
+      "tag": "0001_ambitious_mojo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795510920949,
+      "tag": "0002_gigantic_pepper_potts",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795513297134,
+      "tag": "0003_modern_thunderbolt_ross",
+      "breakpoints": true
     }
   ]
 }

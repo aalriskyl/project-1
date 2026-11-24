@@ -127,12 +127,33 @@ describe.skipIf(!liveTestDbUrl)('PostgreSQL integration suite (real test DB)', (
     const testDb = drizzle(client, { schema });
 
     try {
+      const expectedTables = [
+        'users',
+        'refresh_tokens',
+        'categories',
+        'articles',
+        'products',
+        'product_spareparts',
+        'media_uploads',
+        'password_reset_tokens',
+        'product_reviews',
+      ];
       const rlsRows = await testDb.execute<{ tablename: string; rowsecurity: boolean }>(sql`
         select tablename, rowsecurity
         from pg_tables
-        where schemaname = 'public' and tablename in ('users', 'refresh_tokens')
+        where schemaname = 'public' and tablename in (
+          'users',
+          'refresh_tokens',
+          'categories',
+          'articles',
+          'products',
+          'product_spareparts',
+          'media_uploads',
+          'password_reset_tokens',
+          'product_reviews'
+        )
       `);
-      expect(rlsRows.length).toBe(2);
+      expect(rlsRows.length).toBe(expectedTables.length);
       for (const row of rlsRows) {
         expect(row.rowsecurity).toBe(true);
       }

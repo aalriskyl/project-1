@@ -20,3 +20,13 @@ values:
     enabled: true
     type: default
     description: Authenticated user UUIDv7 populated by Auth requests
+  - key: uploadUrl
+    value: ''
+    enabled: true
+    type: secret
+    description: Presigned Supabase Storage PUT URL populated by Create Presigned Media Upload URL
+  - key: uploadedPublicUrl
+    value: 'https://placehold.co/800x600.webp'
+    enabled: true
+    type: default
+    description: Public CDN image URL populated automatically when requesting a presigned upload URL

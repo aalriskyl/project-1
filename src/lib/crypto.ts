@@ -15,3 +15,11 @@ export function generateOpaqueToken(byteLength: number = DEFAULT_TOKEN_BYTES): s
 export function hashTokenSha256(rawToken: string): string {
   return new Bun.CryptoHasher('sha256').update(rawToken).digest('hex');
 }
+
+/**
+ * Computes a compact weak HTTP ETag for cacheable JSON payloads.
+ */
+export function computeWeakEtag(payload: string): string {
+  const digest = new Bun.CryptoHasher('sha256').update(payload).digest('hex').slice(0, 24);
+  return `W/"${digest}"`;
+}

@@ -1,28 +1,43 @@
 import { env } from '@/config/env.ts';
 import { generateOpaqueToken, hashTokenSha256 } from '@/lib/crypto.ts';
 import { ConflictError, UnauthorizedError } from '@/lib/errors.ts';
+import { type GoogleTokenVerifier, googleTokenVerifier } from '@/lib/google-oauth.ts';
 import { generateId } from '@/lib/id.ts';
 import { type JwtConfig, signAccessToken } from '@/lib/jwt.ts';
+import { type MailProvider, mailProvider } from '@/lib/mailer.ts';
 import { hashPassword, verifyAgainstDummyPassword, verifyPassword } from '@/lib/password.ts';
 import type { AuthRepository, NewRefreshTokenInput } from '@/modules/auth/auth.repository.ts';
 import type {
   AuthSession,
+  ForgotPasswordBody,
+  GoogleLoginBody,
   LoginBody,
   LogoutBody,
   RefreshBody,
   RegisterBody,
+  ResetPasswordBody,
 } from '@/modules/auth/auth.schema.ts';
 import type { UserEntity } from '@/modules/users/users.repository.ts';
 import { serializeUser } from '@/modules/users/users.service.ts';
 
+const GENERIC_FORGOT_PASSWORD_MESSAGE =
+  'If an account exists for that email, a password reset link has been sent.';
+
 export interface AuthServiceOptions {
   readonly refreshTokenTtlSec?: number;
+  readonly passwordResetTtlSec?: number;
+  readonly appPublicUrl?: string;
   readonly jwtConfig?: JwtConfig;
+  readonly googleVerifier?: GoogleTokenVerifier;
+  readonly mailer?: MailProvider;
 }
 
 export interface AuthService {
   register(input: RegisterBody): Promise<AuthSession>;
   login(input: LoginBody): Promise<AuthSession>;
+  googleLogin(input: GoogleLoginBody): Promise<AuthSession>;
+  forgotPassword(input: ForgotPasswordBody): Promise<{ readonly message: string }>;
+  resetPassword(input: ResetPasswordBody): Promise<void>;
   refresh(input: RefreshBody): Promise<AuthSession>;
   logout(input: LogoutBody): Promise<void>;
 }
@@ -54,6 +69,10 @@ export function createAuthService(
   options: AuthServiceOptions = {},
 ): AuthService {
   const refreshTokenTtlSec = options.refreshTokenTtlSec ?? env.REFRESH_TOKEN_TTL_SEC;
+  const passwordResetTtlSec = options.passwordResetTtlSec ?? env.PASSWORD_RESET_TTL_SEC;
+  const appPublicUrl = (options.appPublicUrl ?? env.APP_PUBLIC_URL).replace(/\/+$/, '');
+  const googleVerifier = options.googleVerifier ?? googleTokenVerifier;
+  const mailer = options.mailer ?? mailProvider;
 
   async function buildSessionResponse(
     user: UserEntity,
@@ -103,6 +122,7 @@ export function createAuthService(
           id: userId,
           email: input.email,
           passwordHash,
+          phone: input.phone ?? null,
           displayName: input.displayName,
           role: 'user',
         },
@@ -114,7 +134,7 @@ export function createAuthService(
 
     async login(input: LoginBody): Promise<AuthSession> {
       const existing = await authRepo.findUserByEmailWithCredentials(input.email);
-      if (existing === null) {
+      if (existing === null || existing.passwordHash === null) {
         await verifyAgainstDummyPassword(input.password);
         throw new UnauthorizedError('Invalid email or password', 'INVALID_CREDENTIALS');
       }
@@ -134,6 +154,113 @@ export function createAuthService(
       await authRepo.insertRefreshToken(record);
 
       return buildSessionResponse(existing, rawRefreshToken);
+    },
+
+    async googleLogin(input: GoogleLoginBody): Promise<AuthSession> {
+      const identity = await googleVerifier.verifyIdToken(input.idToken);
+
+      const existingBySub = await authRepo.findUserByGoogleSub(identity.sub);
+      if (existingBySub !== null) {
+        const familyId = generateId();
+        const { rawRefreshToken, record } = buildRefreshTokenCandidate(
+          existingBySub.id,
+          familyId,
+          refreshTokenTtlSec,
+        );
+        await authRepo.insertRefreshToken(record);
+        return buildSessionResponse(existingBySub, rawRefreshToken);
+      }
+
+      const existingByEmail = await authRepo.findUserByEmailWithCredentials(identity.email);
+      if (existingByEmail !== null) {
+        if (existingByEmail.googleSub !== null && existingByEmail.googleSub !== identity.sub) {
+          throw new ConflictError(
+            'This email is already linked to a different Google account',
+            'GOOGLE_SUB_MISMATCH',
+          );
+        }
+
+        const familyId = generateId();
+        const { rawRefreshToken, record } = buildRefreshTokenCandidate(
+          existingByEmail.id,
+          familyId,
+          refreshTokenTtlSec,
+        );
+        const linkedUser = await authRepo.linkGoogleSubAndInsertRefreshToken({
+          userId: existingByEmail.id,
+          googleSub: identity.sub,
+          refreshToken: record,
+        });
+        return buildSessionResponse(linkedUser, rawRefreshToken);
+      }
+
+      const userId = generateId();
+      const familyId = generateId();
+      const { rawRefreshToken, record } = buildRefreshTokenCandidate(
+        userId,
+        familyId,
+        refreshTokenTtlSec,
+      );
+
+      const createdUser = await authRepo.createUserWithRefreshToken({
+        user: {
+          id: userId,
+          email: identity.email,
+          passwordHash: null,
+          googleSub: identity.sub,
+          displayName: identity.displayName,
+          role: 'user',
+        },
+        refreshToken: record,
+      });
+
+      return buildSessionResponse(createdUser, rawRefreshToken);
+    },
+
+    async forgotPassword(input: ForgotPasswordBody): Promise<{ readonly message: string }> {
+      const existing = await authRepo.findUserByEmailWithCredentials(input.email);
+      if (existing === null) {
+        return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
+      }
+
+      const rawResetToken = generateOpaqueToken();
+      const tokenHash = hashTokenSha256(rawResetToken);
+      const expiresAt = new Date(Date.now() + passwordResetTtlSec * 1000);
+
+      await authRepo.createPasswordResetToken({
+        id: generateId(),
+        userId: existing.id,
+        tokenHash,
+        expiresAt,
+      });
+
+      const resetUrl = `${appPublicUrl}/auth/reset-password?token=${encodeURIComponent(rawResetToken)}`;
+      await mailer.sendPasswordResetEmail({
+        to: existing.email,
+        displayName: existing.displayName,
+        resetUrl,
+        expiresInMinutes: Math.max(1, Math.round(passwordResetTtlSec / 60)),
+      });
+
+      return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
+    },
+
+    async resetPassword(input: ResetPasswordBody): Promise<void> {
+      const tokenHash = hashTokenSha256(input.token);
+      const passwordHash = await hashPassword(input.newPassword);
+
+      const consumed = await authRepo.consumePasswordResetTokenAndUpdatePassword({
+        tokenHash,
+        passwordHash,
+        now: new Date(),
+      });
+
+      if (!consumed) {
+        throw new UnauthorizedError(
+          'Invalid or expired password reset token',
+          'INVALID_RESET_TOKEN',
+        );
+      }
     },
 
     async refresh(input: RefreshBody): Promise<AuthSession> {

@@ -1,0 +1,19 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/articles'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "title": "Cara Memilih Genset Silent 30 kVA untuk Industri",
+      "excerpt": "Panduan lengkap memilih kapasitas, mesin Perkins/Cummins, dan perawatan genset silent.",
+      "contentMd": "## 1. Hitung Kebutuhan Daya (kVA)\n\nPastikan cadangan daya minimal 20%...",
+      "coverImageUrl": "{{uploadedPublicUrl}}",
+      "metaTitle": "Cara Memilih Genset Silent 30 kVA | Tsuzumi Japan",
+      "tags": ["genset", "perkins", "industri"],
+      "isPublished": true
+    }

@@ -1,0 +1,23 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/products/:id/reviews?limit=10'
+order: 5000
+queryParams:
+  - key: limit
+    value: '10'
+pathVariables:
+  - key: id
+    value: '01936c8e-7f2a-7000-8000-000000000301'
+    description: Product UUIDv7
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns cursor-paginated product reviews', () => {
+        const json = pm.response.json();
+        pm.expect(json.data).to.be.an('array');
+        pm.expect(json.meta).to.be.an('object');
+      });

@@ -8,6 +8,8 @@ Stateless, versioned REST API built with **Bun**, **Hono** (`@hono/zod-openapi`)
 src/
   app.ts                 # Hono OpenAPI app composition (no listen; exported for tests & RPC)
   index.ts               # Bun.serve entry point + graceful SIGTERM/SIGINT shutdown
+  v1/
+    routes.ts            # Central /v1 router aggregator mounting feature modules
   config/
     env.ts               # Fail-fast Zod environment validation
   db/

@@ -15,6 +15,7 @@ export function serializeUser(entity: UserEntity): PublicUser {
   return {
     id: entity.id,
     email: entity.email,
+    phone: entity.phone,
     displayName: entity.displayName,
     role: entity.role,
     createdAt: entity.createdAt.toISOString(),
@@ -33,7 +34,10 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
     },
 
     async updateMe(actor: AuthUser, input: UpdateMeBody): Promise<PublicUser> {
-      const updated = await usersRepo.updateDisplayName(actor.id, input.displayName);
+      const updated = await usersRepo.updateProfile(actor.id, {
+        ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone } : {}),
+      });
       if (updated === null) {
         throw new NotFoundError('User not found', 'USER_NOT_FOUND');
       }

@@ -1,0 +1,27 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/media/upload-url'
+order: 3500
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "folder": "products",
+      "contentType": "image/png",
+      "contentLengthBytes": 245000
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.environment.set('uploadUrl', json.data.uploadUrl);
+        pm.environment.set('uploadedPublicUrl', json.data.publicUrl);
+      }
