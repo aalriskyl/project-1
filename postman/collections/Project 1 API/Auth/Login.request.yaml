@@ -1,0 +1,26 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/auth/login'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "ada@example.com",
+      "password": "correct-horse-battery-staple"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns authenticated session tokens', () => {
+        const json = pm.response.json();
+        pm.expect(json.data.tokens.accessToken).to.be.a('string');
+        pm.expect(json.data.tokens.refreshToken).to.be.a('string');
+      });

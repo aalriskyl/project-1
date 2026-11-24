@@ -1,0 +1,24 @@
+$kind: http-request
+method: PATCH
+url: '{{baseUrl}}/v1/users/me'
+order: 2000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "displayName": "Ada Byron"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Updates displayName', () => {
+        const json = pm.response.json();
+        pm.expect(json.data.displayName).to.eql('Ada Byron');
+      });

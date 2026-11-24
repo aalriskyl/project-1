@@ -1,0 +1,15 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/users/:id'
+order: 3000
+pathVariables:
+  - key: id
+    value: '{{userId}}'
+    description: Target user UUIDv7 (must match own ID unless admin)
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });

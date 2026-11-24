@@ -1,0 +1,12 @@
+$kind: collection
+name: Project 1 API
+description: Versioned REST API built with Bun, Hono, Zod OpenAPI, and Drizzle ORM on Supabase PostgreSQL.
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{accessToken}}'
+variables:
+  - key: baseUrl
+    value: 'http://localhost:3000'
+    description: Fallback API base URL when no environment is selected

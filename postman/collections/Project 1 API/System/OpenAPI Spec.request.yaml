@@ -1,0 +1,15 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/openapi.json'
+order: 3000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('OpenAPI 3.1.0 document returned', () => {
+        const spec = pm.response.json();
+        pm.expect(spec.openapi).to.eql('3.1.0');
+      });

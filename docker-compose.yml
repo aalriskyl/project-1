@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: project_1_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d project_1_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: info
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/project_1_dev
+      DIRECT_URL: postgresql://postgres:postgres@postgres:5432/project_1_dev
+      JWT_ACCESS_SECRET: local-dev-only-secret-change-in-production-min-32-chars
+      JWT_ISSUER: project-1-api
+      JWT_AUDIENCE: project-1-client
+
+volumes:
+  pgdata:
