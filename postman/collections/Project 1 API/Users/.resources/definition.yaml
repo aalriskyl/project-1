@@ -1,4 +1,0 @@
-$kind: collection
-name: Users
-description: Authenticated user profile endpoints with server-side IDOR ownership checks and cursor pagination.
-order: 3000

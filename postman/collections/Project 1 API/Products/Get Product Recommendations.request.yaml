@@ -1,7 +1,0 @@
-$kind: http-request
-method: GET
-url: '{{baseUrl}}/v1/products/recommendations?limit=6'
-order: 4000
-queryParams:
-  - key: limit
-    value: '6'

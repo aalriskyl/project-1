@@ -1,7 +1,0 @@
-$kind: http-request
-method: GET
-url: '{{baseUrl}}/v1/products/compare?slugs=genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50'
-order: 3000
-queryParams:
-  - key: slugs
-    value: genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50

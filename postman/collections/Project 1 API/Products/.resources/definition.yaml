@@ -1,6 +1,0 @@
-$kind: collection
-name: Products
-description: Zero-join product cards, SKU/FTS search, single-row detail with optional includes, and batched /compare.
-order: 4500
-auth:
-  type: noauth

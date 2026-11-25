@@ -1,4 +1,0 @@
-$kind: collection
-name: Media
-description: Request a signed URL, PUT the binary image to Storage, complete verification, then attach the verified public URL. Cleanup deletes only unreferenced assets older than the grace window.
-order: 4000

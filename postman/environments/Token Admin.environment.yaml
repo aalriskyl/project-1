@@ -1,6 +1,0 @@
-name: Token Admin
-values:
-  - key: accessToken
-    value: ''
-  - key: articleId
-    value: ''

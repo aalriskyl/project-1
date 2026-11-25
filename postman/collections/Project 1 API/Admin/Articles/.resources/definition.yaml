@@ -1,4 +1,0 @@
-$kind: collection
-name: Articles
-description: Admin SEO article publishing and management endpoints.
-order: 3000

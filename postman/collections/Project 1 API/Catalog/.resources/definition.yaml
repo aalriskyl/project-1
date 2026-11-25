@@ -1,6 +1,0 @@
-$kind: collection
-name: Catalog
-description: Public category tree, subcategory detail with inherited spec schemas, and Next.js SEO sitemap feed.
-order: 4000
-auth:
-  type: noauth

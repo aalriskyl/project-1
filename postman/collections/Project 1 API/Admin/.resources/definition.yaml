@@ -1,4 +1,0 @@
-$kind: collection
-name: Admin
-description: Backoffice CRUD endpoints requiring BearerAuth with role === 'admin'.
-order: 6000

@@ -10,6 +10,11 @@ node_modules/
 dist/
 coverage/
 
+# Local API tooling & internal planning notes
+.postman/
+postman/
+docs/
+
 # OS & editor files
 .DS_Store
 Thumbs.db

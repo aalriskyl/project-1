@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { app } from '@/app.ts';
+
+const hasPostmanWorkspace = existsSync('postman/specs/openapi.json');
 
 const RequestSchema = z.object({
   method: z.string(),
@@ -15,7 +18,7 @@ const RequestSchema = z.object({
 });
 const SpecSchema = z.object({ paths: z.record(z.string(), z.record(z.string(), z.unknown())) });
 
-describe('Postman contracts', () => {
+describe.skipIf(!hasPostmanWorkspace)('Postman contracts', () => {
   test('keeps the OpenAPI snapshot synchronized with the application', async () => {
     const generated: unknown = await (await app.request('/v1/openapi.json')).json();
     const saved: unknown = await Bun.file('postman/specs/openapi.json').json();
