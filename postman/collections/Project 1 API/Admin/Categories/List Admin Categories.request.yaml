@@ -1,0 +1,33 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/admin/categories?limit=20'
+order: 1000
+queryParams:
+  - key: limit
+    value: '20'
+  - key: page
+    value: '1'
+    disabled: true
+    description: Optional 1-based page number (returns total & totalPages in meta)
+  - key: q
+    value: perkins
+    disabled: true
+    description: Optional fuzzy text search query
+  - key: cursor
+    value: ''
+    disabled: true
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized category list', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data).to.be.an('array');
+        if (json.data[0]?.id) {
+          pm.environment.set('categoryId', json.data[0].id);
+        }
+      });

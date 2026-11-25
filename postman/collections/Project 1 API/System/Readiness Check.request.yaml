@@ -1,0 +1,16 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/ready'
+order: 2000
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 (Supabase pooler reachable)', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Readiness status is ready', () => {
+        const body = pm.response.json();
+        pm.expect(body.success).to.eql(true);
+        pm.expect(body.data.status).to.eql('ready');
+      });

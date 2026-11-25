@@ -1,0 +1,4 @@
+$kind: collection
+name: Products
+description: Admin product catalog and spare-part linking endpoints.
+order: 2000

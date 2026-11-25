@@ -1,0 +1,15 @@
+$kind: http-request
+method: DELETE
+url: '{{baseUrl}}/v1/admin/articles/:id'
+order: 2300
+pathVariables:
+  - key: id
+    value: '{{articleId}}'
+    description: Article UUIDv7
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 204 No Content', () => {
+        pm.response.to.have.status(204);
+      });

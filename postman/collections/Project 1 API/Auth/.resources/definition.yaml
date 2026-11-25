@@ -1,0 +1,22 @@
+$kind: collection
+name: Auth
+description: Custom Argon2id authentication with short-lived HS256 JWT access tokens and rotating SHA-256 refresh tokens.
+order: 2000
+auth:
+  type: noauth
+scripts:
+  - type: http:afterResponse
+    language: text/javascript
+    code: |-
+      if ([200, 201].includes(pm.response.code)) {
+        const json = pm.response.json();
+        const tokens = json?.data?.tokens;
+        const user = json?.data?.user;
+        if (tokens?.accessToken && tokens?.refreshToken) {
+          pm.environment.set('accessToken', tokens.accessToken);
+          pm.environment.set('refreshToken', tokens.refreshToken);
+        }
+        if (user?.id) {
+          pm.environment.set('userId', user.id);
+        }
+      }

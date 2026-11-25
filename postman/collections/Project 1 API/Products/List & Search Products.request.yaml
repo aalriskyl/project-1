@@ -1,0 +1,36 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/products?limit=20'
+order: 1000
+queryParams:
+  - key: limit
+    value: '20'
+  - key: categorySlug
+    value: genset-silent
+    disabled: true
+  - key: brandSlug
+    value: perkins
+    disabled: true
+  - key: q
+    value: TPG30
+    disabled: true
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized paginated products', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data).to.be.an('array');
+        const equipment = json.data.find((p) => p.productType === 'equipment');
+        const sparepart = json.data.find((p) => p.productType === 'sparepart');
+        if (equipment?.id) {
+          pm.environment.set('productId', equipment.id);
+        }
+        if (sparepart?.id) {
+          pm.environment.set('sparepartProductId', sparepart.id);
+        }
+      });

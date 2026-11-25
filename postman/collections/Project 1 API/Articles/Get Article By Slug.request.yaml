@@ -1,0 +1,24 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/articles/:slug?includeRelated=true'
+order: 2000
+pathVariables:
+  - key: slug
+    value: cara-memilih-genset-silent-30-kva-vs-50-kva
+queryParams:
+  - key: includeRelated
+    value: 'true'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized article envelope', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('articleId', json.data.id);
+        }
+      });

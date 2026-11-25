@@ -1,0 +1,50 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/products'
+order: 4000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryId": "{{categoryId}}",
+      "brandSlug": "perkins",
+      "name": "Genset 30 kVA Silent Diesel Tsuzumi TPG30",
+      "sku": "TPG30-SILENT",
+      "metaTitle": "Genset 30 kVA Silent Perkins Tsuzumi TPG30 | Harga & Spesifikasi",
+      "focusKeyword": "genset 30 kva silent perkins",
+      "noIndex": false,
+      "ogImageUrl": "{{uploadedPublicUrl}}",
+      "priceIdr": 177500000,
+      "requiresQuote": true,
+      "stock": 2,
+      "isFeatured": true,
+      "weightKg": 920.5,
+      "media": [
+        {
+          "type": "image",
+          "url": "{{uploadedPublicUrl}}",
+          "altText": "Genset 30 kVA Silent Tsuzumi TPG30"
+        }
+      ],
+      "specs": {
+        "rated_power_kva": 30,
+        "voltage": "220/380V"
+      }
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('productId', json.data.id);
+        }
+      }

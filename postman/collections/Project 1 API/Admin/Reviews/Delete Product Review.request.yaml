@@ -1,0 +1,15 @@
+$kind: http-request
+method: DELETE
+url: '{{baseUrl}}/v1/admin/reviews/:id'
+order: 6100
+pathVariables:
+  - key: id
+    value: '{{reviewId}}'
+    description: Product review UUIDv7
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 204 No Content', () => {
+        pm.response.to.have.status(204);
+      });
