@@ -1,6 +1,9 @@
 # Use this workspace to collaborate
 workspace:
   id: ff8c61d3-97cb-4d70-88e5-536c0be48c05
+resourceNameMappings:
+  specs:
+    - ../postman/specs/openapi.json: openapi.json
 
 # All resources in the `postman/` folder are automatically registered in Local View.
 # Point to additional files outside the `postman/` folder to register them individually. Example:
