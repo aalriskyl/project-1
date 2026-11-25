@@ -6,6 +6,10 @@ queryParams:
   - key: tree
     value: 'true'
     description: Nest subcategories under root categories
+  - key: q
+    value: perkins
+    disabled: true
+    description: Optional fuzzy text search query
 scripts:
   - type: afterResponse
     language: text/javascript

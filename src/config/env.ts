@@ -35,48 +35,88 @@ const CorsOriginsSchema = z
     },
   );
 
-const EnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  HOST: z.string().min(1).default('0.0.0.0'),
-  PORT: z.coerce.number().int().min(0).max(65535).default(3000),
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
-  CORS_ORIGINS: CorsOriginsSchema,
-  MAX_BODY_BYTES: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(1024 * 1024),
-  REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+const EnvSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    HOST: z.string().min(1).default('0.0.0.0'),
+    PORT: z.coerce.number().int().min(0).max(65535).default(3000),
+    LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
+    CORS_ORIGINS: CorsOriginsSchema,
+    MAX_BODY_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(1024 * 1024),
+    REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
-  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
-  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    REDIS_URL: z
+      .url()
+      .refine((v) => /^rediss?:\/\//.test(v))
+      .optional(),
+    TRUSTED_PROXY_IPS: z
+      .string()
+      .default('')
+      .transform((v) =>
+        v
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.union([z.ipv4(), z.ipv6()]))),
 
-  DATABASE_URL: PostgresUrlSchema,
-  DIRECT_URL: PostgresUrlSchema.optional(),
-  DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(5),
-  DB_IDLE_TIMEOUT_SEC: z.coerce.number().int().positive().default(20),
-  DB_CONNECT_TIMEOUT_SEC: z.coerce.number().int().positive().default(10),
+    DATABASE_URL: PostgresUrlSchema,
+    DIRECT_URL: PostgresUrlSchema.optional(),
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(5),
+    DB_IDLE_TIMEOUT_SEC: z.coerce.number().int().positive().default(20),
+    DB_CONNECT_TIMEOUT_SEC: z.coerce.number().int().positive().default(10),
 
-  JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
-  JWT_ISSUER: z.string().min(1).default('project-1-api'),
-  JWT_AUDIENCE: z.string().min(1).default('project-1-client'),
-  JWT_ACCESS_TTL_SEC: z.coerce.number().int().min(60).max(86_400).default(900),
-  REFRESH_TOKEN_TTL_SEC: z.coerce.number().int().min(300).max(2_592_000).default(604_800),
+    JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 characters'),
+    JWT_ISSUER: z.string().min(1).default('project-1-api'),
+    JWT_AUDIENCE: z.string().min(1).default('project-1-client'),
+    JWT_ACCESS_TTL_SEC: z.coerce.number().int().min(60).max(86_400).default(900),
+    REFRESH_TOKEN_TTL_SEC: z.coerce.number().int().min(300).max(2_592_000).default(604_800),
 
-  NEXTJS_REVALIDATE_URL: z.url().optional(),
-  NEXTJS_REVALIDATE_SECRET: z.string().min(16).optional(),
+    NEXTJS_REVALIDATE_URL: z.url().optional(),
+    NEXTJS_REVALIDATE_SECRET: z.string().min(16).optional(),
 
-  SUPABASE_URL: z.url().optional(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
-  SUPABASE_STORAGE_BUCKET: z.string().min(1).max(63).default('public-assets'),
+    SUPABASE_URL: z.url().optional(),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+    SUPABASE_STORAGE_BUCKET: z.string().min(1).max(63).default('public-assets'),
+    MEDIA_CLEANUP_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
 
-  GOOGLE_OAUTH_CLIENT_ID: z.string().min(10).optional(),
-  RESEND_API_KEY: z.string().min(10).optional(),
-  MAIL_FROM: z.string().min(3).max(160).default('Tsuzumi Japan <no-reply@tsuzumijapan.com>'),
-  APP_PUBLIC_URL: z.url().default('http://localhost:3001'),
-  PASSWORD_RESET_TTL_SEC: z.coerce.number().int().min(300).max(86_400).default(1_800),
-});
+    GOOGLE_OAUTH_CLIENT_ID: z.string().min(10).optional(),
+    RESEND_API_KEY: z.string().min(10).optional(),
+    MAIL_OUTBOX_ENCRYPTION_KEY: z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/)
+      .optional(),
+    MAIL_FROM: z.string().min(3).max(160).default('Tsuzumi Japan <no-reply@tsuzumijapan.com>'),
+    APP_PUBLIC_URL: z.url().default('http://localhost:3001'),
+    PASSWORD_RESET_TTL_SEC: z.coerce.number().int().min(300).max(86_400).default(1_800),
+  })
+  .superRefine((value, ctx) => {
+    if (value.NODE_ENV !== 'production') return;
+    for (const field of ['REDIS_URL', 'RESEND_API_KEY', 'MAIL_OUTBOX_ENCRYPTION_KEY'] as const) {
+      if (value[field] === undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} is required in production`,
+        });
+    }
+    if (!value.APP_PUBLIC_URL.startsWith('https://'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_PUBLIC_URL'],
+        message: 'Production reset links must use HTTPS',
+      });
+  });
 
 export type Env = Omit<z.infer<typeof EnvSchema>, 'LOG_LEVEL'> & {
   readonly LOG_LEVEL: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';

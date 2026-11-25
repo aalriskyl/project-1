@@ -1,6 +1,12 @@
-import { NotFoundError } from '@/lib/errors.ts';
+import { NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
-import { type CursorPage, decodeCursor, encodeCursor } from '@/lib/pagination.ts';
+import {
+  assertCursorOrPage,
+  buildOffsetPage,
+  type CursorPage,
+  decodeCursor,
+  encodeCursor,
+} from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { ProductsRepository } from '@/modules/products/products.repository.ts';
@@ -10,6 +16,7 @@ import type {
 } from '@/modules/reviews/reviews.repository.ts';
 import type {
   CreateProductReviewBody,
+  ListAdminReviewsQuery,
   ListProductReviewsQuery,
   ModerateReviewBody,
   PublicProductReview,
@@ -20,6 +27,10 @@ export interface ReviewsService {
   listProductReviews(
     productId: string,
     query: ListProductReviewsQuery,
+  ): Promise<CursorPage<PublicProductReview>>;
+  listAdminReviews(
+    actor: AuthUser,
+    query: ListAdminReviewsQuery,
   ): Promise<CursorPage<PublicProductReview>>;
   createProductReview(
     actor: AuthUser,
@@ -86,11 +97,62 @@ export function createReviewsService(
       };
     },
 
+    async listAdminReviews(
+      actor: AuthUser,
+      query: ListAdminReviewsQuery,
+    ): Promise<CursorPage<PublicProductReview>> {
+      assertAdminUser(actor);
+      assertCursorOrPage(query);
+
+      if (query.page !== undefined) {
+        const offset = (query.page - 1) * query.limit;
+        const { items, total } = await reviewsRepo.listAdminOffset({
+          limit: query.limit,
+          offset,
+          ...(query.productId !== undefined ? { productId: query.productId } : {}),
+          ...(query.isPublished !== undefined ? { isPublished: query.isPublished } : {}),
+          ...(query.rating !== undefined ? { rating: query.rating } : {}),
+        });
+        return buildOffsetPage(items.map(serializeReview), total, query.page, query.limit);
+      }
+
+      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
+      const rows = await reviewsRepo.listAdminCursor({
+        limit: query.limit + 1,
+        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.productId !== undefined ? { productId: query.productId } : {}),
+        ...(query.isPublished !== undefined ? { isPublished: query.isPublished } : {}),
+        ...(query.rating !== undefined ? { rating: query.rating } : {}),
+      });
+
+      const hasMore = rows.length > query.limit;
+      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
+      const lastItem = pageItems[pageItems.length - 1];
+      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
+
+      return {
+        data: pageItems.map(serializeReview),
+        meta: {
+          nextCursor,
+          hasMore,
+          limit: query.limit,
+        },
+      };
+    },
+
     async createProductReview(
       actor: AuthUser,
       productId: string,
       body: CreateProductReviewBody,
     ): Promise<PublicProductReview> {
+      if (body.orderId !== undefined && body.orderId !== null) {
+        throw new ValidationError('Purchase verification is not available', [
+          {
+            field: 'orderId',
+            message: 'Order associations must be verified server-side; omit orderId',
+          },
+        ]);
+      }
       const product = await productsRepo.findById(productId);
       if (product === null || !product.isActive) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');

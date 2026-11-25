@@ -6,3 +6,4 @@ export * from '@/db/schema/product-reviews.ts';
 export * from '@/db/schema/products.ts';
 export * from '@/db/schema/refresh-tokens.ts';
 export * from '@/db/schema/users.ts';
+export * from '@/db/schema/mail-outbox.ts';

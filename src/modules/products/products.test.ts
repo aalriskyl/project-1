@@ -224,11 +224,16 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     const rootFilterPage = ProductCursorPageSchema.parse(await rootFilterRes.json());
     expect(rootFilterPage.data).toHaveLength(3);
 
-    // SKU search
+    // SKU search & typo-tolerant fuzzy search ('gensset perkns')
     const skuSearchRes = await testApp.request('/v1/products?q=TPG30');
     const skuSearchPage = ProductCursorPageSchema.parse(await skuSearchRes.json());
     expect(skuSearchPage.data).toHaveLength(1);
     expect(skuSearchPage.data[0]?.sku).toBe('TPG30-SILENT');
+
+    const fuzzyProdRes = await testApp.request('/v1/products?q=gensset%20perkns');
+    expect(fuzzyProdRes.status).toBe(200);
+    const fuzzyProdPage = ProductCursorPageSchema.parse(await fuzzyProdRes.json());
+    expect(fuzzyProdPage.data).toHaveLength(2);
 
     // 7. Single-hop detail with ?include=spareparts,related
     const detailRes = await testApp.request(

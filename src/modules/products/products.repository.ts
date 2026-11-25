@@ -1,3 +1,4 @@
+import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import type { Database } from '@/db/client.ts';
@@ -10,6 +11,7 @@ import {
 } from '@/db/schema/products.ts';
 import { ConflictError } from '@/lib/errors.ts';
 import type { DecodedCursor } from '@/lib/pagination.ts';
+import { buildFuzzySearchCondition } from '@/lib/search.ts';
 import type { ProductType } from '@/modules/products/products.schema.ts';
 
 export interface ProductCardRow {
@@ -60,6 +62,10 @@ export interface CreateProductRecord {
   readonly descriptionMd: string | null;
   readonly metaTitle: string | null;
   readonly metaDescription: string | null;
+  readonly focusKeyword: string | null;
+  readonly canonicalUrl: string | null;
+  readonly noIndex: boolean;
+  readonly ogImageUrl: string | null;
   readonly priceIdr: number;
   readonly requiresQuote: boolean;
   readonly stock: number;
@@ -84,6 +90,10 @@ export interface UpdateProductRecord {
   readonly descriptionMd?: string | null;
   readonly metaTitle?: string | null;
   readonly metaDescription?: string | null;
+  readonly focusKeyword?: string | null;
+  readonly canonicalUrl?: string | null;
+  readonly noIndex?: boolean;
+  readonly ogImageUrl?: string | null;
   readonly priceIdr?: number;
   readonly requiresQuote?: boolean;
   readonly stock?: number;
@@ -103,7 +113,13 @@ export interface ProductsRepository {
   listAdminCursor(params: {
     readonly limit: number;
     readonly cursor?: DecodedCursor;
+    readonly query?: string;
   }): Promise<readonly ProductCardRow[]>;
+  listAdminOffset(params: {
+    readonly limit: number;
+    readonly offset: number;
+    readonly query?: string;
+  }): Promise<{ readonly items: readonly ProductCardRow[]; readonly total: number }>;
   findActiveBySlug(slug: string): Promise<ProductRow | null>;
   findById(id: string): Promise<ProductRow | null>;
   findActiveByIds(ids: readonly string[]): Promise<readonly ProductRow[]>;
@@ -128,10 +144,6 @@ export interface ProductsRepository {
   softDeleteById(id: string, deletedAt: Date): Promise<boolean>;
 }
 
-function escapeLikePattern(raw: string): string {
-  return raw.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-}
-
 function extractPostgresError(err: unknown): postgres.PostgresError | null {
   if (err instanceof postgres.PostgresError) {
     return err;
@@ -154,6 +166,8 @@ function mapUniqueViolation(err: unknown): never {
 }
 
 export function createProductsRepository(db: Database): ProductsRepository {
+  const productSearchTarget = sql`(${products.name} || ' ' || coalesce(${products.sku}, '') || ' ' || coalesce(${products.brandSlug}, ''))`;
+
   const cardColumns = {
     id: products.id,
     categoryId: products.categoryId,
@@ -203,9 +217,12 @@ export function createProductsRepository(db: Database): ProductsRepository {
         conditions.push(lte(products.priceIdr, filter.maxPrice));
       }
       if (filter.query !== undefined) {
-        const likeTerm = `%${escapeLikePattern(filter.query)}%`;
         conditions.push(
-          sql`(${products.searchVector} @@ websearch_to_tsquery('simple', ${filter.query}) OR (${products.name} || ' ' || coalesce(${products.sku}, '')) ILIKE ${likeTerm})`,
+          buildFuzzySearchCondition({
+            targetSql: productSearchTarget,
+            query: filter.query,
+            searchVector: sql`${products.searchVector}`,
+          }),
         );
       }
       if (filter.cursor !== undefined) {
@@ -226,8 +243,17 @@ export function createProductsRepository(db: Database): ProductsRepository {
         .limit(filter.limit);
     },
 
-    async listAdminCursor({ limit, cursor }): Promise<readonly ProductCardRow[]> {
+    async listAdminCursor({ limit, cursor, query }): Promise<readonly ProductCardRow[]> {
       const conditions: SQL[] = [isNull(products.deletedAt)];
+      if (query !== undefined) {
+        conditions.push(
+          buildFuzzySearchCondition({
+            targetSql: productSearchTarget,
+            query,
+            searchVector: sql`${products.searchVector}`,
+          }),
+        );
+      }
       if (cursor !== undefined) {
         const cursorCond = or(
           lt(products.createdAt, cursor.createdAt),
@@ -244,6 +270,36 @@ export function createProductsRepository(db: Database): ProductsRepository {
         .where(and(...conditions))
         .orderBy(desc(products.createdAt), desc(products.id))
         .limit(limit);
+    },
+
+    async listAdminOffset({ limit, offset, query }) {
+      const conditions: SQL[] = [isNull(products.deletedAt)];
+      if (query !== undefined) {
+        conditions.push(
+          buildFuzzySearchCondition({
+            targetSql: productSearchTarget,
+            query,
+            searchVector: sql`${products.searchVector}`,
+          }),
+        );
+      }
+      const whereClause = and(...conditions);
+
+      const [items, countRows] = await Promise.all([
+        db
+          .select(cardColumns)
+          .from(products)
+          .where(whereClause)
+          .orderBy(desc(products.createdAt), desc(products.id))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ total: sql<number>`count(*)::int` })
+          .from(products)
+          .where(whereClause),
+      ]);
+
+      return { items, total: countRows[0]?.total ?? 0 };
     },
 
     async findActiveBySlug(slug: string): Promise<ProductRow | null> {
@@ -389,38 +445,44 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async create(input: CreateProductRecord): Promise<ProductRow> {
       try {
-        const [created] = await db
-          .insert(products)
-          .values({
-            id: input.id,
-            categoryId: input.categoryId,
-            brandSlug: input.brandSlug,
-            name: input.name,
-            slug: input.slug,
-            sku: input.sku,
-            productType: input.productType,
-            descriptionMd: input.descriptionMd,
-            metaTitle: input.metaTitle,
-            metaDescription: input.metaDescription,
-            priceIdr: input.priceIdr,
-            requiresQuote: input.requiresQuote,
-            stock: input.stock,
-            isFeatured: input.isFeatured,
-            isActive: input.isActive,
-            primaryImageUrl: input.primaryImageUrl,
-            media: input.media,
-            specs: input.specs,
-            lengthCm: input.lengthCm,
-            widthCm: input.widthCm,
-            heightCm: input.heightCm,
-            weightKg: input.weightKg,
-          })
-          .returning();
+        return await withMediaMutation(db, 'products', async (tx) => {
+          const [created] = await tx
+            .insert(products)
+            .values({
+              id: input.id,
+              categoryId: input.categoryId,
+              brandSlug: input.brandSlug,
+              name: input.name,
+              slug: input.slug,
+              sku: input.sku,
+              productType: input.productType,
+              descriptionMd: input.descriptionMd,
+              metaTitle: input.metaTitle,
+              metaDescription: input.metaDescription,
+              focusKeyword: input.focusKeyword,
+              canonicalUrl: input.canonicalUrl,
+              noIndex: input.noIndex,
+              ogImageUrl: input.ogImageUrl,
+              priceIdr: input.priceIdr,
+              requiresQuote: input.requiresQuote,
+              stock: input.stock,
+              isFeatured: input.isFeatured,
+              isActive: input.isActive,
+              primaryImageUrl: input.primaryImageUrl,
+              media: input.media,
+              specs: input.specs,
+              lengthCm: input.lengthCm,
+              widthCm: input.widthCm,
+              heightCm: input.heightCm,
+              weightKg: input.weightKg,
+            })
+            .returning();
 
-        if (created === undefined) {
-          throw new Error('Failed to insert product');
-        }
-        return created;
+          if (created === undefined) {
+            throw new Error('Failed to insert product');
+          }
+          return created;
+        });
       } catch (err) {
         return mapUniqueViolation(err);
       }
@@ -428,27 +490,32 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async updateById(id: string, patch: UpdateProductRecord): Promise<ProductRow | null> {
       try {
-        const [updated] = await db
-          .update(products)
-          .set({
-            ...patch,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(products.id, id), isNull(products.deletedAt)))
-          .returning();
-        return updated ?? null;
+        return await withMediaMutation(db, 'products', async (tx) => {
+          const [updated] = await tx
+            .update(products)
+            .set({
+              ...patch,
+              updatedAt: new Date(),
+            })
+            .where(and(eq(products.id, id), isNull(products.deletedAt)))
+            .returning();
+          return updated ?? null;
+        });
       } catch (err) {
         return mapUniqueViolation(err);
       }
     },
 
     async softDeleteById(id: string, deletedAt: Date): Promise<boolean> {
-      const [deleted] = await db
-        .update(products)
-        .set({ deletedAt, updatedAt: deletedAt })
-        .where(and(eq(products.id, id), isNull(products.deletedAt)))
-        .returning({ id: products.id });
-      return deleted !== undefined;
+      const deleted = await withMediaMutation(db, 'products', async (tx) => {
+        const [row] = await tx
+          .update(products)
+          .set({ deletedAt, updatedAt: deletedAt })
+          .where(and(eq(products.id, id), isNull(products.deletedAt)))
+          .returning();
+        return row ?? null;
+      });
+      return deleted !== null;
     },
   };
 }

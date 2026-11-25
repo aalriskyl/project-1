@@ -16,5 +16,6 @@ export interface AppVariables {
 }
 
 export interface AppEnv {
+  Bindings: { clientIp?: string };
   Variables: AppVariables;
 }

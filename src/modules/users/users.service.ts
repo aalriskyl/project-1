@@ -1,5 +1,11 @@
 import { ForbiddenError, NotFoundError } from '@/lib/errors.ts';
-import { type CursorPage, decodeCursor, encodeCursor } from '@/lib/pagination.ts';
+import {
+  assertCursorOrPage,
+  buildOffsetPage,
+  type CursorPage,
+  decodeCursor,
+  encodeCursor,
+} from '@/lib/pagination.ts';
 import type { UserEntity, UsersRepository } from '@/modules/users/users.repository.ts';
 import type { ListUsersQuery, PublicUser, UpdateMeBody } from '@/modules/users/users.schema.ts';
 import type { AuthUser } from '@/types/app.ts';
@@ -62,10 +68,25 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
         throw new ForbiddenError('Admin privileges required to list users', 'USER_FORBIDDEN');
       }
 
+      assertCursorOrPage(query);
+
+      if (query.page !== undefined) {
+        const offset = (query.page - 1) * query.limit;
+        const { items, total } = await usersRepo.listOffset({
+          limit: query.limit,
+          offset,
+          ...(query.q !== undefined ? { query: query.q } : {}),
+          ...(query.role !== undefined ? { role: query.role } : {}),
+        });
+        return buildOffsetPage(items.map(serializeUser), total, query.page, query.limit);
+      }
+
       const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
       const rows = await usersRepo.listCursor({
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
+        ...(query.role !== undefined ? { role: query.role } : {}),
       });
 
       const hasMore = rows.length > query.limit;

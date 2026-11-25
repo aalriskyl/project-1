@@ -15,7 +15,11 @@
     "format": "bun --bun prettier --write .",
     "db:generate": "bun --bun drizzle-kit generate",
     "db:migrate": "bun --bun drizzle-kit migrate",
-    "db:studio": "bun --bun drizzle-kit studio"
+    "db:seed": "bun run src/db/seed.ts",
+    "db:refresh": "bun run src/db/refresh.ts",
+    "db:studio": "bun --bun drizzle-kit studio",
+    "docs:openapi": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts",
+    "docs:check": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts --check"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",

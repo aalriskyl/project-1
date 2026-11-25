@@ -40,6 +40,10 @@ export const categories = pgTable(
     description: text('description'),
     metaTitle: varchar('meta_title', { length: 160 }),
     metaDescription: varchar('meta_description', { length: 320 }),
+    focusKeyword: varchar('focus_keyword', { length: 120 }),
+    canonicalUrl: text('canonical_url'),
+    noIndex: boolean('no_index').notNull().default(false),
+    ogImageUrl: text('og_image_url'),
     imageUrl: text('image_url'),
     bannerImageUrl: text('banner_image_url'),
     specSchema: jsonb('spec_schema').$type<SpecFieldDefRow[]>().notNull().default([]),
@@ -62,6 +66,10 @@ export const categories = pgTable(
     index('categories_active_sort_id_idx')
       .on(table.sortOrder, table.id)
       .where(sql`${table.deletedAt} is null and ${table.isActive} = true`),
+    index('categories_search_trgm_gin_idx').using(
+      'gin',
+      sql`(${table.name} || ' ' || ${table.slug} || ' ' || coalesce(${table.description}, '')) extensions.gin_trgm_ops`,
+    ),
   ],
 ).enableRLS();
 

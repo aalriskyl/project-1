@@ -78,6 +78,9 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
         excerpt: 'Panduan memilih concrete cutter untuk proyek jalan.',
         contentMd: '## Fungsi Mesin Potong Aspal\n\nDigunakan pada konstruksi jalan...',
         metaTitle: 'Mesin Potong Aspal Terbaik | Tsuzumi Japan',
+        focusKeyword: 'mesin potong aspal',
+        canonicalUrl: 'https://tsuzumijapan.com/articles/mesin-potong-aspal-fungsi-dan-spesifikasi',
+        ogImageUrl: 'https://placehold.co/1200x630.webp',
         tags: ['Konstruksi', 'Cutting', 'konstruksi'],
         relatedProductIds: ['01936c8e-7f2a-7000-8000-000000000555'],
         isPublished: false,
@@ -143,12 +146,18 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
     });
     expect(dupSlugRes.status).toBe(409);
 
-    // 3. Public tag filter + cursor pagination
+    // 3. Public tag filter, fuzzy text search ('aspall'), and cursor pagination
     const gensetTagRes = await testApp.request('/v1/articles?tag=genset');
     expect(gensetTagRes.status).toBe(200);
     const gensetPage = ArticleCursorPageSchema.parse(await gensetTagRes.json());
     expect(gensetPage.data).toHaveLength(1);
     expect(gensetPage.data[0]?.slug).toBe('cara-merawat-genset-silent-30-kva');
+
+    const fuzzyArticleRes = await testApp.request('/v1/articles?q=aspall');
+    expect(fuzzyArticleRes.status).toBe(200);
+    const fuzzyArticlePage = ArticleCursorPageSchema.parse(await fuzzyArticleRes.json());
+    expect(fuzzyArticlePage.data).toHaveLength(1);
+    expect(fuzzyArticlePage.data[0]?.slug).toBe('mesin-potong-aspal-fungsi-dan-spesifikasi');
 
     const page1Res = await testApp.request('/v1/articles?limit=1');
     const page1 = ArticleCursorPageSchema.parse(await page1Res.json());
@@ -170,10 +179,40 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
     expect(detail.data.relatedArticles).toHaveLength(1);
     expect(detail.data.relatedArticles?.[0]?.slug).toBe('cara-merawat-genset-silent-30-kva');
 
-    // 5. Sitemap now includes both published articles
+    // 5. Published article with noIndex=true is excluded from /v1/seo/sitemap; insecure http:// canonicalUrl is rejected
+    const badCanonicalRes = await testApp.request('/v1/admin/articles', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Bad Canonical Post',
+        contentMd: 'Body',
+        canonicalUrl: 'http://insecure.example.com/post',
+      }),
+    });
+    expect(badCanonicalRes.status).toBe(422);
+
+    const noIndexRes = await testApp.request('/v1/admin/articles', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: 'Hidden Promo Page',
+        contentMd: 'NoIndex body',
+        noIndex: true,
+        isPublished: true,
+      }),
+    });
+    expect(noIndexRes.status).toBe(201);
+
     const sitemapRes = await testApp.request('/v1/seo/sitemap');
     const sitemap = SitemapResponseSchema.parse(await sitemapRes.json());
     expect(sitemap.data.articles).toHaveLength(2);
+    expect(sitemap.data.articles.some((a) => a.slug === 'hidden-promo-page')).toBe(false);
 
     // 6. Soft-delete removes article from public view
     const delRes = await testApp.request(`/v1/admin/articles/${draft.data.id}`, {

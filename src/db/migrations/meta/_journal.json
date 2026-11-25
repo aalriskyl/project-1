@@ -29,6 +29,41 @@
       "when": 1795513297134,
       "tag": "0003_modern_thunderbolt_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795573263161,
+      "tag": "0004_small_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795574971490,
+      "tag": "0005_huge_natasha_romanoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795576454279,
+      "tag": "0006_audit_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795576480259,
+      "tag": "0007_media_reference_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795577876512,
+      "tag": "0008_awesome_terrax",
+      "breakpoints": true
     }
   ]
 }

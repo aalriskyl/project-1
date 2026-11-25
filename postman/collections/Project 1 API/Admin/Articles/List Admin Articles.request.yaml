@@ -1,0 +1,36 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/admin/articles?limit=10'
+order: 1900
+queryParams:
+  - key: limit
+    value: '10'
+  - key: page
+    value: '1'
+    disabled: true
+    description: Optional 1-based page number (returns total & totalPages in meta)
+  - key: tag
+    value: genset
+    disabled: true
+  - key: q
+    value: aspall
+    disabled: true
+    description: Optional fuzzy text search query
+  - key: cursor
+    value: ''
+    disabled: true
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized paginated articles list', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data).to.be.an('array');
+        if (json.data[0]?.id) {
+          pm.environment.set('articleId', json.data[0].id);
+        }
+      });

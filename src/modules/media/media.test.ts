@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
 import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/asset-url.ts';
 import { generateId } from '@/lib/id.ts';
+import { ConflictError } from '@/lib/errors.ts';
 import { signAccessToken } from '@/lib/jwt.ts';
 import { createSupabaseStorageProvider, type StorageProvider } from '@/lib/storage.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
@@ -67,8 +68,14 @@ describe('Asset URL policy & Media orphan sweep (/v1/admin/media/*)', () => {
     const adminToken = (await signAccessToken(adminActor)).token;
     const userToken = (await signAccessToken(userActor)).token;
     const deletedFromStorage: string[] = [];
+    let uploaded = false;
 
     const mockProvider: StorageProvider = {
+      verifyImageUpload() {
+        return uploaded
+          ? Promise.resolve()
+          : Promise.reject(new ConflictError('File missing', 'MEDIA_UPLOAD_MISSING'));
+      },
       createSignedImageUpload(input) {
         const objectPath = `${input.folder}/2026/11/01936c8e-7f2a-7000-8000-000000000333.webp`;
         return Promise.resolve({
@@ -159,6 +166,54 @@ describe('Asset URL policy & Media orphan sweep (/v1/admin/media/*)', () => {
     expect(okRes.status).toBe(201);
     const signed = SignedUploadUrlEnvelopeSchema.parse(await okRes.json());
     expect(signed.data.bucket).toBe('public-assets');
+    const completeUrl = `/v1/admin/media/${signed.data.uploadId}/complete`;
+    expect((await testApp.request(completeUrl, { method: 'POST' })).status).toBe(401);
+    expect(
+      (
+        await testApp.request(completeUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${userToken}` },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await testApp.request('/v1/admin/media/invalid/complete', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await testApp.request(completeUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(409);
+    const saveImage = () =>
+      testApp.request('/v1/admin/articles', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Verified upload article',
+          contentMd: 'Test',
+          coverImageUrl: signed.data.publicUrl,
+        }),
+      });
+    expect((await saveImage()).status).toBe(409);
+    uploaded = true;
+    for (let i = 0; i < 2; i += 1)
+      expect(
+        (
+          await testApp.request(completeUrl, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${adminToken}` },
+          })
+        ).status,
+      ).toBe(200);
+    expect((await saveImage()).status).toBe(201);
 
     // Seed 3 uploads created 48h ago:
     // 1) cover.webp (used as coverImageUrl)
@@ -202,11 +257,11 @@ describe('Asset URL policy & Media orphan sweep (/v1/admin/media/*)', () => {
         Authorization: `Bearer ${adminToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ olderThanHours: 24, limit: 100 }),
+      body: JSON.stringify({ olderThanHours: 24, limit: 1 }),
     });
     expect(sweepRes.status).toBe(200);
     const sweep = CleanupOrphansEnvelopeSchema.parse(await sweepRes.json()).data;
-    expect(sweep.scannedCount).toBe(3);
+    expect(sweep.scannedCount).toBe(1);
     expect(sweep.deletedCount).toBe(1);
     expect(sweep.deletedPaths).toEqual([orphanPath]);
     expect(deletedFromStorage).toEqual([orphanPath]);

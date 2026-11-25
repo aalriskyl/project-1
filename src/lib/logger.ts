@@ -2,6 +2,15 @@ import pino, { type Logger } from 'pino';
 import { env } from '@/config/env.ts';
 
 const REDACTED_PATHS = [
+  'recipient',
+  'to',
+  'email',
+  '*.email',
+  '*.recipient',
+  'resetUrl',
+  '*.resetUrl',
+  'payload',
+  '*.payload',
   'req.headers.authorization',
   'req.headers.cookie',
   'headers.authorization',

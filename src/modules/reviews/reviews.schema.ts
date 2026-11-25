@@ -1,5 +1,10 @@
 import { z } from '@hono/zod-openapi';
-import { createCursorPageSchema } from '@/lib/pagination.ts';
+import {
+  AdminPaginationQuerySchema,
+  createCursorPageSchema,
+  QueryBooleanSchema,
+} from '@/lib/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 
 export const ProductReviewSchema = z
   .object({
@@ -35,11 +40,39 @@ export const ListProductReviewsQuerySchema = z.object({
 
 export type ListProductReviewsQuery = z.infer<typeof ListProductReviewsQuerySchema>;
 
+export const ListAdminReviewsQuerySchema = AdminPaginationQuerySchema.extend({
+  productId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'productId', in: 'query' },
+      description: 'Filter reviews by product UUID',
+    }),
+  isPublished: QueryBooleanSchema.optional().openapi({
+    param: { name: 'isPublished', in: 'query' },
+    description: 'Filter reviews by publication status',
+  }),
+  rating: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .optional()
+    .openapi({
+      param: { name: 'rating', in: 'query' },
+      description: 'Filter reviews by star rating (1..5)',
+    }),
+});
+
+export type ListAdminReviewsQuery = z.infer<typeof ListAdminReviewsQuerySchema>;
+
 export const CreateProductReviewBodySchema = z
   .strictObject({
     rating: z.number().int().min(1).max(5).openapi({ example: 5 }),
     comment: z.string().trim().max(2_000).nullable().optional(),
-    orderId: z.uuid().nullable().optional(),
+    orderId: z.null().optional().openapi({
+      description: 'Reserved for future server-verified purchases. Omit or send null.',
+    }),
   })
   .openapi('CreateProductReviewBody');
 
@@ -59,9 +92,10 @@ export const ReviewIdParamSchema = z.object({
   }),
 });
 
-export const ProductReviewEnvelopeSchema = z
-  .object({ data: ProductReviewSchema })
-  .openapi('ProductReviewEnvelope');
+export const ProductReviewEnvelopeSchema = createSuccessEnvelopeSchema(
+  ProductReviewSchema,
+  'ProductReviewEnvelope',
+);
 
 export const ProductReviewCursorPageSchema = createCursorPageSchema(
   ProductReviewSchema,

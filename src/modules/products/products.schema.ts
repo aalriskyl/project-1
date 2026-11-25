@@ -1,6 +1,18 @@
 import { z } from '@hono/zod-openapi';
-import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/asset-url.ts';
-import { createCursorPageSchema, MAX_PAGE_SIZE, QueryBooleanSchema } from '@/lib/pagination.ts';
+import {
+  AssetImageUrlSchema,
+  CanonicalUrlSchema,
+  isAllowedAssetImageUrl,
+  isAllowedAssetVideoUrl,
+} from '@/lib/asset-url.ts';
+import {
+  AdminPaginationQuerySchema,
+  createCursorPageSchema,
+  MAX_PAGE_SIZE,
+  QueryBooleanSchema,
+} from '@/lib/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
+import { SearchQueryParamSchema } from '@/lib/search.ts';
 import { SpecFieldDefSchema } from '@/modules/catalog/catalog.schema.ts';
 
 export const PRODUCT_TYPES = ['equipment', 'sparepart'] as const;
@@ -126,6 +138,10 @@ export const ProductDetailSchema = ProductCardSchema.extend({
   descriptionMd: z.string().nullable(),
   metaTitle: z.string().nullable(),
   metaDescription: z.string().nullable(),
+  focusKeyword: z.string().nullable(),
+  canonicalUrl: z.string().nullable(),
+  noIndex: z.boolean(),
+  ogImageUrl: z.string().nullable(),
   media: z.array(ProductMediaItemSchema),
   specs: ProductSpecsSchema,
   effectiveSpecSchema: z.array(SpecFieldDefSchema),
@@ -178,20 +194,16 @@ export const ListProductsQuerySchema = z.object({
     .nonnegative()
     .optional()
     .openapi({ param: { name: 'maxPrice', in: 'query' } }),
-  q: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .optional()
-    .openapi({
-      param: { name: 'q', in: 'query' },
-      description: 'Search across product name, SKU, brand, and description',
-      example: 'TPG30 perkins',
-    }),
+  q: SearchQueryParamSchema,
 });
 
 export type ListProductsQuery = z.infer<typeof ListProductsQuerySchema>;
+
+export const ListAdminProductsQuerySchema = AdminPaginationQuerySchema.extend({
+  q: SearchQueryParamSchema,
+});
+
+export type ListAdminProductsQuery = z.infer<typeof ListAdminProductsQuerySchema>;
 
 export type ProductDetailInclude = 'spareparts' | 'related';
 
@@ -297,6 +309,10 @@ export const CreateProductBodySchema = z
     descriptionMd: z.string().trim().max(100_000).nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().default(false),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     priceIdr: z.number().int().min(0).max(100_000_000_000),
     requiresQuote: z.boolean().default(false),
     stock: z.number().int().min(0).max(1_000_000).default(0),
@@ -324,6 +340,10 @@ export const UpdateProductBodySchema = z
     descriptionMd: z.string().trim().max(100_000).nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().optional(),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     priceIdr: z.number().int().min(0).max(100_000_000_000).optional(),
     requiresQuote: z.boolean().optional(),
     stock: z.number().int().min(0).max(1_000_000).optional(),
@@ -368,19 +388,25 @@ export const SparepartCursorPageSchema = createCursorPageSchema(
   'SparepartCursorPage',
 );
 
-export const ProductCardListEnvelopeSchema = z
-  .object({ data: z.array(ProductCardSchema) })
-  .openapi('ProductCardListEnvelope');
+export const ProductCardListEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.array(ProductCardSchema),
+  'ProductCardListEnvelope',
+);
 
-export const ProductDetailEnvelopeSchema = z
-  .object({ data: ProductDetailSchema })
-  .openapi('ProductDetailEnvelope');
+export const ProductSparepartsListEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.array(ProductSparepartLinkItemSchema),
+  'ProductSparepartsListEnvelope',
+);
 
-export const CompareProductsEnvelopeSchema = z
-  .object({
-    data: z.object({
-      specSchema: z.array(SpecFieldDefSchema),
-      products: z.array(ProductDetailSchema),
-    }),
-  })
-  .openapi('CompareProductsEnvelope');
+export const ProductDetailEnvelopeSchema = createSuccessEnvelopeSchema(
+  ProductDetailSchema,
+  'ProductDetailEnvelope',
+);
+
+export const CompareProductsEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.object({
+    specSchema: z.array(SpecFieldDefSchema),
+    products: z.array(ProductDetailSchema),
+  }),
+  'CompareProductsEnvelope',
+);

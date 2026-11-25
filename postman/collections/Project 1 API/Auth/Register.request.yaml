@@ -9,9 +9,10 @@ body:
   type: json
   content: |-
     {
-      "email": "ada@example.com",
+      "email": "new.customer@tsuzumi.test",
       "password": "correct-horse-battery-staple",
-      "displayName": "Ada Lovelace"
+      "displayName": "Ada Lovelace",
+      "phone": "+6281234567890"
     }
 scripts:
   - type: afterResponse
@@ -22,6 +23,7 @@ scripts:
       });
       pm.test('Returns user and Bearer token pair', () => {
         const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
         pm.expect(json.data.user.id).to.be.a('string');
         pm.expect(json.data.tokens.tokenType).to.eql('Bearer');
         pm.expect(json.data.tokens.accessToken).to.be.a('string');

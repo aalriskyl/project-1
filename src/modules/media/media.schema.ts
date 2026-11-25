@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_UPLOAD_BYTES, MEDIA_FOLDERS } from '@/lib/storage.ts';
 
 export const RequestUploadUrlBodySchema = z
@@ -18,6 +19,7 @@ export type RequestUploadUrlBody = z.infer<typeof RequestUploadUrlBodySchema>;
 
 export const SignedUploadUrlSchema = z
   .object({
+    uploadId: z.uuid(),
     bucket: z.string().openapi({ example: 'public-assets' }),
     objectPath: z
       .string()
@@ -32,20 +34,27 @@ export const SignedUploadUrlSchema = z
   })
   .openapi('SignedUploadUrl');
 
-export const SignedUploadUrlEnvelopeSchema = z
-  .object({
-    data: SignedUploadUrlSchema,
-  })
-  .openapi('SignedUploadUrlEnvelope');
+export const SignedUploadUrlEnvelopeSchema = createSuccessEnvelopeSchema(
+  SignedUploadUrlSchema,
+  'SignedUploadUrlEnvelope',
+);
 
 export const CleanupOrphansBodySchema = z
   .strictObject({
-    olderThanHours: z.number().int().min(1).max(8_760).default(24).openapi({ example: 24 }),
+    olderThanHours: z.number().int().min(3).max(8_760).default(24).openapi({ example: 24 }),
     limit: z.number().int().min(1).max(500).default(100).openapi({ example: 100 }),
   })
   .openapi('CleanupOrphansBody');
 
 export type CleanupOrphansBody = z.infer<typeof CleanupOrphansBodySchema>;
+
+export const CompleteUploadParamSchema = z.object({
+  id: z.uuid().openapi({ param: { name: 'id', in: 'path' } }),
+});
+export const CompletedUploadEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.object({ uploadId: z.uuid(), publicUrl: z.url(), status: z.literal('verified') }),
+  'CompletedUploadEnvelope',
+);
 
 export const CleanupOrphansResultSchema = z
   .object({
@@ -57,8 +66,7 @@ export const CleanupOrphansResultSchema = z
 
 export type CleanupOrphansResult = z.infer<typeof CleanupOrphansResultSchema>;
 
-export const CleanupOrphansEnvelopeSchema = z
-  .object({
-    data: CleanupOrphansResultSchema,
-  })
-  .openapi('CleanupOrphansEnvelope');
+export const CleanupOrphansEnvelopeSchema = createSuccessEnvelopeSchema(
+  CleanupOrphansResultSchema,
+  'CleanupOrphansEnvelope',
+);

@@ -1,6 +1,13 @@
 import type { CategoryRow, SpecFieldDefRow } from '@/db/schema/categories.ts';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
+import {
+  assertCursorOrPage,
+  buildOffsetPage,
+  type CursorPage,
+  decodeCursor,
+  encodeCursor,
+} from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { slugify } from '@/lib/slug.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
@@ -9,6 +16,7 @@ import type {
   CategoryDetail,
   CategoryTreeNode,
   CreateCategoryBody,
+  ListAdminCategoriesQuery,
   ListCategoriesQuery,
   PublicCategory,
   SitemapData,
@@ -23,7 +31,10 @@ export interface CatalogService {
   ): Promise<readonly (PublicCategory | CategoryTreeNode)[]>;
   getPublicCategoryBySlug(slug: string): Promise<CategoryDetail>;
   getSitemap(): Promise<SitemapData>;
-  listAdminCategories(actor: AuthUser): Promise<readonly PublicCategory[]>;
+  listAdminCategories(
+    actor: AuthUser,
+    query: ListAdminCategoriesQuery,
+  ): Promise<CursorPage<PublicCategory>>;
   createCategory(actor: AuthUser, input: CreateCategoryBody): Promise<PublicCategory>;
   updateCategory(actor: AuthUser, id: string, input: UpdateCategoryBody): Promise<PublicCategory>;
   deleteCategory(actor: AuthUser, id: string): Promise<void>;
@@ -48,6 +59,10 @@ export function serializeCategory(row: CategoryRow): PublicCategory {
     description: row.description,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
+    focusKeyword: row.focusKeyword,
+    canonicalUrl: row.canonicalUrl,
+    noIndex: row.noIndex,
+    ogImageUrl: row.ogImageUrl,
     imageUrl: row.imageUrl,
     bannerImageUrl: row.bannerImageUrl,
     specSchema: row.specSchema.map(serializeSpecField),
@@ -123,17 +138,39 @@ export function createCatalogService(
     async listPublicCategories(
       query: ListCategoriesQuery,
     ): Promise<readonly (PublicCategory | CategoryTreeNode)[]> {
-      const rows = await catalogRepo.listActive();
+      const rows = await catalogRepo.listActive(
+        query.q !== undefined ? { query: query.q } : undefined,
+      );
       const serialized = rows.map(serializeCategory);
 
       if (query.tree !== true) {
         return serialized;
       }
 
+      // If a fuzzy search matched a subcategory without matching its parent, include the active parent so the tree stays intact.
+      const byId = new Map(serialized.map((item) => [item.id, item]));
+      const missingParentIds = [
+        ...new Set(
+          serialized
+            .map((item) => item.parentId)
+            .filter((pid): pid is string => pid !== null && !byId.has(pid)),
+        ),
+      ];
+      if (missingParentIds.length > 0) {
+        const fetchedParents = await Promise.all(
+          missingParentIds.map((pid) => catalogRepo.findById(pid)),
+        );
+        for (const parent of fetchedParents) {
+          if (parent !== null && parent.isActive) {
+            byId.set(parent.id, serializeCategory(parent));
+          }
+        }
+      }
+
       const childrenByParent = new Map<string, PublicCategory[]>();
       const roots: PublicCategory[] = [];
 
-      for (const item of serialized) {
+      for (const item of byId.values()) {
         if (item.parentId === null) {
           roots.push(item);
         } else {
@@ -203,10 +240,43 @@ export function createCatalogService(
       };
     },
 
-    async listAdminCategories(actor: AuthUser): Promise<readonly PublicCategory[]> {
+    async listAdminCategories(
+      actor: AuthUser,
+      query: ListAdminCategoriesQuery,
+    ): Promise<CursorPage<PublicCategory>> {
       assertAdminUser(actor);
-      const rows = await catalogRepo.listAllNonDeleted();
-      return rows.map(serializeCategory);
+      assertCursorOrPage(query);
+
+      if (query.page !== undefined) {
+        const offset = (query.page - 1) * query.limit;
+        const { items, total } = await catalogRepo.listAdminOffset({
+          limit: query.limit,
+          offset,
+          ...(query.q !== undefined ? { query: query.q } : {}),
+        });
+        return buildOffsetPage(items.map(serializeCategory), total, query.page, query.limit);
+      }
+
+      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
+      const rows = await catalogRepo.listAdminCursor({
+        limit: query.limit + 1,
+        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
+      });
+
+      const hasMore = rows.length > query.limit;
+      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
+      const lastItem = pageItems[pageItems.length - 1];
+      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
+
+      return {
+        data: pageItems.map(serializeCategory),
+        meta: {
+          nextCursor,
+          hasMore,
+          limit: query.limit,
+        },
+      };
     },
 
     async createCategory(actor: AuthUser, input: CreateCategoryBody): Promise<PublicCategory> {
@@ -222,6 +292,10 @@ export function createCatalogService(
         description: input.description ?? null,
         metaTitle: input.metaTitle ?? null,
         metaDescription: input.metaDescription ?? null,
+        focusKeyword: input.focusKeyword ?? null,
+        canonicalUrl: input.canonicalUrl ?? null,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl ?? null,
         imageUrl: input.imageUrl ?? null,
         bannerImageUrl: input.bannerImageUrl ?? null,
         specSchema: input.specSchema,
@@ -256,6 +330,10 @@ export function createCatalogService(
         ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.metaTitle !== undefined ? { metaTitle: input.metaTitle } : {}),
         ...(input.metaDescription !== undefined ? { metaDescription: input.metaDescription } : {}),
+        ...(input.focusKeyword !== undefined ? { focusKeyword: input.focusKeyword } : {}),
+        ...(input.canonicalUrl !== undefined ? { canonicalUrl: input.canonicalUrl } : {}),
+        ...(input.noIndex !== undefined ? { noIndex: input.noIndex } : {}),
+        ...(input.ogImageUrl !== undefined ? { ogImageUrl: input.ogImageUrl } : {}),
         ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
         ...(input.bannerImageUrl !== undefined ? { bannerImageUrl: input.bannerImageUrl } : {}),
         ...(input.specSchema !== undefined ? { specSchema: input.specSchema } : {}),

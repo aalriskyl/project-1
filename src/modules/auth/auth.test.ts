@@ -180,10 +180,47 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
     });
     expect(pwLoginOnGoogleOnly.status).toBe(401);
 
-    // Google Sign-In links to existing email account, and blocks conflicting sub
-    const googleLinkRes = await testApp.request('/v1/auth/google', {
+    const implicitLink = await testApp.request('/v1/auth/google', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'valid-google-token-existing-ada' }),
+    });
+    expect(implicitLink.status).toBe(409);
+    const linkRequest = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: 'valid-google-token-existing-ada' }),
+    };
+    expect((await testApp.request('/v1/auth/google/link', linkRequest)).status).toBe(401);
+    expect(
+      (
+        await testApp.request('/v1/auth/google/link', {
+          ...linkRequest,
+          headers: {
+            ...linkRequest.headers,
+            Authorization: `Bearer ${googleNew.data.tokens.accessToken}`,
+          },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await testApp.request('/v1/auth/google/link', {
+          ...linkRequest,
+          headers: {
+            ...linkRequest.headers,
+            Authorization: `Bearer ${registerJson.data.tokens.accessToken}`,
+          },
+          body: JSON.stringify({ idToken: 'short' }),
+        })
+      ).status,
+    ).toBe(422);
+    const googleLinkRes = await testApp.request('/v1/auth/google/link', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${registerJson.data.tokens.accessToken}`,
+      },
       body: JSON.stringify({ idToken: 'valid-google-token-existing-ada' }),
     });
     expect(googleLinkRes.status).toBe(200);
@@ -271,8 +308,9 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
     });
     expect(invalidRes.status).toBe(422);
     const invalidJson = ErrorResponseSchema.parse(await invalidRes.json());
-    expect(invalidJson.error.code).toBe('VALIDATION_ERROR');
-    expect(invalidJson.error.details?.length).toBeGreaterThan(0);
+    expect(invalidJson.success).toBe(false);
+    expect(invalidJson.errorCode).toBe('VALIDATION_ERROR');
+    expect(invalidJson.details?.length).toBeGreaterThan(0);
 
     const secondRes = await testApp.request('/v1/auth/login', {
       method: 'POST',

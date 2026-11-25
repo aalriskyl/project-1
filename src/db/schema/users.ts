@@ -31,6 +31,10 @@ export const users = pgTable(
   },
   (table) => [
     index('users_created_at_id_idx').on(table.createdAt, table.id),
+    index('users_search_trgm_gin_idx').using(
+      'gin',
+      sql`(${table.displayName} || ' ' || ${table.email} || ' ' || coalesce(${table.phone}, '')) extensions.gin_trgm_ops`,
+    ),
     uniqueIndex('users_google_sub_uidx')
       .on(table.googleSub)
       .where(sql`${table.googleSub} is not null`),

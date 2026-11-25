@@ -4,6 +4,8 @@ import type { ProductMediaItemRow, ProductRow, ProductSpecsMap } from '@/db/sche
 import { NotFoundError, ValidationError, type ValidationIssueDetail } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import {
+  assertCursorOrPage,
+  buildOffsetPage,
   type CursorPage,
   type CursorPaginationQuery,
   decodeCursor,
@@ -25,6 +27,7 @@ import type {
   CompareProductsQuery,
   CreateProductBody,
   GetProductDetailQuery,
+  ListAdminProductsQuery,
   ListProductsQuery,
   ProductCard,
   ProductDetail,
@@ -63,7 +66,7 @@ export interface ProductsService {
   resolveRelatedProductCards(productIds: readonly string[]): Promise<readonly RelatedProductCard[]>;
   listAdminProducts(
     actor: AuthUser,
-    query: CursorPaginationQuery,
+    query: ListAdminProductsQuery,
   ): Promise<CursorPage<ProductCard>>;
   getAdminProductById(actor: AuthUser, id: string): Promise<ProductDetail>;
   createProduct(actor: AuthUser, input: CreateProductBody): Promise<ProductDetail>;
@@ -221,6 +224,10 @@ export function createProductsService(
       descriptionMd: row.descriptionMd,
       metaTitle: row.metaTitle,
       metaDescription: row.metaDescription,
+      focusKeyword: row.focusKeyword,
+      canonicalUrl: row.canonicalUrl,
+      noIndex: row.noIndex,
+      ogImageUrl: row.ogImageUrl,
       media: row.media.map((m) => ({
         id: m.id,
         type: m.type,
@@ -485,14 +492,26 @@ export function createProductsService(
 
     async listAdminProducts(
       actor: AuthUser,
-      query: CursorPaginationQuery,
+      query: ListAdminProductsQuery,
     ): Promise<CursorPage<ProductCard>> {
       assertAdminUser(actor);
+      assertCursorOrPage(query);
+
+      if (query.page !== undefined) {
+        const offset = (query.page - 1) * query.limit;
+        const { items, total } = await productsRepo.listAdminOffset({
+          limit: query.limit,
+          offset,
+          ...(query.q !== undefined ? { query: query.q } : {}),
+        });
+        return buildOffsetPage(items.map(serializeProductCard), total, query.page, query.limit);
+      }
 
       const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
       const rows = await productsRepo.listAdminCursor({
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
       const hasMore = rows.length > query.limit;
@@ -546,6 +565,10 @@ export function createProductsService(
         descriptionMd: input.descriptionMd ?? null,
         metaTitle: input.metaTitle ?? null,
         metaDescription: input.metaDescription ?? null,
+        focusKeyword: input.focusKeyword ?? null,
+        canonicalUrl: input.canonicalUrl ?? null,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl ?? null,
         priceIdr: input.priceIdr,
         requiresQuote: input.requiresQuote,
         stock: input.stock,
@@ -594,6 +617,10 @@ export function createProductsService(
         ...(input.descriptionMd !== undefined ? { descriptionMd: input.descriptionMd } : {}),
         ...(input.metaTitle !== undefined ? { metaTitle: input.metaTitle } : {}),
         ...(input.metaDescription !== undefined ? { metaDescription: input.metaDescription } : {}),
+        ...(input.focusKeyword !== undefined ? { focusKeyword: input.focusKeyword } : {}),
+        ...(input.canonicalUrl !== undefined ? { canonicalUrl: input.canonicalUrl } : {}),
+        ...(input.noIndex !== undefined ? { noIndex: input.noIndex } : {}),
+        ...(input.ogImageUrl !== undefined ? { ogImageUrl: input.ogImageUrl } : {}),
         ...(input.priceIdr !== undefined ? { priceIdr: input.priceIdr } : {}),
         ...(input.requiresQuote !== undefined ? { requiresQuote: input.requiresQuote } : {}),
         ...(input.stock !== undefined ? { stock: input.stock } : {}),

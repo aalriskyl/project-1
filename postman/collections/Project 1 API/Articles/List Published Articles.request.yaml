@@ -8,6 +8,10 @@ queryParams:
   - key: tag
     value: genset
     disabled: true
+  - key: q
+    value: genset silent
+    disabled: true
+    description: Optional fuzzy text search query
   - key: cursor
     value: ''
     disabled: true

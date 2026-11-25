@@ -1,0 +1,4 @@
+$kind: collection
+name: Categories
+description: Admin category and taxonomy CRUD endpoints.
+order: 1000

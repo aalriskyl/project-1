@@ -12,8 +12,8 @@ headers:
     value: application/json
 pathVariables:
   - key: id
-    value: '01936c8e-7f2a-7000-8000-000000000301'
-    description: Product UUIDv7
+    value: '{{productId}}'
+    description: Product UUIDv7 (auto-populated by List & Search Products)
 body:
   type: json
   content: |-
@@ -28,3 +28,10 @@ scripts:
       pm.test('Status code is 201 Created', () => {
         pm.response.to.have.status(201);
       });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('reviewId', json.data.id);
+        }
+      }

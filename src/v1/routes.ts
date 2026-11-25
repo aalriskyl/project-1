@@ -55,7 +55,7 @@ export function createV1Routes(deps: V1RoutesDependencies) {
   v1.use('*', deps.globalRateLimiter);
 
   return v1
-    .route('/auth', createAuthRoutes(deps.authService, deps.authRateLimiter))
+    .route('/auth', createAuthRoutes(deps.authService, deps.authRateLimiter, authGuard))
     .route('/users', createUsersRoutes(deps.usersService, authGuard))
     .route('/categories', createPublicCatalogRoutes(deps.catalogService))
     .route('/products', createProductReviewsRoutes(deps.reviewsService, authGuard))

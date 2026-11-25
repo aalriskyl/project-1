@@ -1,0 +1,20 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/admin/products/:id'
+order: 4100
+pathVariables:
+  - key: id
+    value: '{{productId}}'
+    description: Product UUIDv7
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized product detail', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.id).to.be.a('string');
+      });

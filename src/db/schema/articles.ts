@@ -28,6 +28,10 @@ export const articles = pgTable(
     coverImageUrl: text('cover_image_url'),
     metaTitle: varchar('meta_title', { length: 160 }),
     metaDescription: varchar('meta_description', { length: 320 }),
+    focusKeyword: varchar('focus_keyword', { length: 120 }),
+    canonicalUrl: text('canonical_url'),
+    noIndex: boolean('no_index').notNull().default(false),
+    ogImageUrl: text('og_image_url'),
     tags: text('tags')
       .array()
       .notNull()
@@ -54,6 +58,10 @@ export const articles = pgTable(
       .on(table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} is null`),
     index('articles_tags_gin_idx').using('gin', table.tags),
+    index('articles_search_trgm_gin_idx').using(
+      'gin',
+      sql`(${table.title} || ' ' || ${table.slug} || ' ' || coalesce(${table.excerpt}, '')) extensions.gin_trgm_ops`,
+    ),
   ],
 ).enableRLS();
 

@@ -29,12 +29,32 @@ export interface CreateReviewRecord {
   readonly comment: string | null;
 }
 
+export interface AdminReviewsFilter {
+  readonly productId?: string;
+  readonly isPublished?: boolean;
+  readonly rating?: number;
+}
+
 export interface ReviewsRepository {
   listPublishedByProductCursor(params: {
     readonly productId: string;
     readonly limit: number;
     readonly cursor?: DecodedCursor;
   }): Promise<readonly ProductReviewWithAuthorRow[]>;
+  listAdminCursor(params: {
+    readonly limit: number;
+    readonly cursor?: DecodedCursor;
+    readonly productId?: string;
+    readonly isPublished?: boolean;
+    readonly rating?: number;
+  }): Promise<readonly ProductReviewWithAuthorRow[]>;
+  listAdminOffset(params: {
+    readonly limit: number;
+    readonly offset: number;
+    readonly productId?: string;
+    readonly isPublished?: boolean;
+    readonly rating?: number;
+  }): Promise<{ readonly items: readonly ProductReviewWithAuthorRow[]; readonly total: number }>;
   createAndSyncProductRating(input: CreateReviewRecord): Promise<ProductReviewWithAuthorRow>;
   updatePublishStateAndSyncRating(
     reviewId: string,
@@ -119,11 +139,83 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         .limit(limit);
     },
 
+    async listAdminCursor({
+      limit,
+      cursor,
+      productId,
+      isPublished,
+      rating,
+    }): Promise<readonly ProductReviewWithAuthorRow[]> {
+      const conditions = [];
+      if (productId !== undefined) {
+        conditions.push(eq(productReviews.productId, productId));
+      }
+      if (isPublished !== undefined) {
+        conditions.push(eq(productReviews.isPublished, isPublished));
+      }
+      if (rating !== undefined) {
+        conditions.push(eq(productReviews.rating, rating));
+      }
+      if (cursor !== undefined) {
+        const cursorCond = or(
+          lt(productReviews.createdAt, cursor.createdAt),
+          and(eq(productReviews.createdAt, cursor.createdAt), lt(productReviews.id, cursor.id)),
+        );
+        if (cursorCond !== undefined) {
+          conditions.push(cursorCond);
+        }
+      }
+
+      return db
+        .select(selectShape)
+        .from(productReviews)
+        .innerJoin(users, eq(productReviews.userId, users.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
+        .limit(limit);
+    },
+
+    async listAdminOffset({ limit, offset, productId, isPublished, rating }) {
+      const conditions = [];
+      if (productId !== undefined) {
+        conditions.push(eq(productReviews.productId, productId));
+      }
+      if (isPublished !== undefined) {
+        conditions.push(eq(productReviews.isPublished, isPublished));
+      }
+      if (rating !== undefined) {
+        conditions.push(eq(productReviews.rating, rating));
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [items, countRows] = await Promise.all([
+        db
+          .select(selectShape)
+          .from(productReviews)
+          .innerJoin(users, eq(productReviews.userId, users.id))
+          .where(whereClause)
+          .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
+          .limit(limit)
+          .offset(offset),
+        db
+          .select({ total: sql<number>`count(*)::int` })
+          .from(productReviews)
+          .where(whereClause),
+      ]);
+
+      return { items, total: countRows[0]?.total ?? 0 };
+    },
+
     async createAndSyncProductRating(
       input: CreateReviewRecord,
     ): Promise<ProductReviewWithAuthorRow> {
       try {
         return await db.transaction(async (tx) => {
+          await tx
+            .select({ id: products.id })
+            .from(products)
+            .where(eq(products.id, input.productId))
+            .for('update');
           await tx.insert(productReviews).values({
             id: input.id,
             productId: input.productId,
@@ -164,6 +256,16 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
       isPublished: boolean,
     ): Promise<ProductReviewWithAuthorRow | null> {
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ productId: productReviews.productId })
+          .from(productReviews)
+          .where(eq(productReviews.id, reviewId));
+        if (target === undefined) return null;
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, target.productId))
+          .for('update');
         const [updated] = await tx
           .update(productReviews)
           .set({ isPublished, updatedAt: new Date() })
@@ -189,6 +291,16 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
 
     async deleteAndSyncRating(reviewId: string): Promise<{ readonly productId: string } | null> {
       return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({ productId: productReviews.productId })
+          .from(productReviews)
+          .where(eq(productReviews.id, reviewId));
+        if (target === undefined) return null;
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, target.productId))
+          .for('update');
         const [deleted] = await tx
           .delete(productReviews)
           .where(eq(productReviews.id, reviewId))

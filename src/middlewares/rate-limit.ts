@@ -1,4 +1,6 @@
 import type { Context } from 'hono';
+import { isIP } from 'node:net';
+import { env } from '@/config/env.ts';
 import { createMiddleware } from 'hono/factory';
 import { RateLimitError } from '@/lib/errors.ts';
 import type { AppEnv } from '@/types/app.ts';
@@ -60,41 +62,29 @@ export interface RateLimiterOptions {
   readonly max: number;
   readonly keyPrefix: string;
   readonly store?: RateLimitStore;
-  readonly trustProxy?: boolean;
+  readonly trustedProxyIps?: readonly string[];
   readonly keyGenerator?: (c: Context<AppEnv>) => string;
 }
 
-function defaultClientKey(c: Context<AppEnv>, trustProxy: boolean): string {
-  const user = c.get('user');
-  if (user !== undefined) {
-    return `user:${user.id}`;
+function defaultClientKey(c: Context<AppEnv>, trustedProxyIps: readonly string[]): string {
+  const peer = c.env?.clientIp;
+  // The final proxy must overwrite X-Real-IP; never trust an arbitrary forwarded chain.
+  if (peer !== undefined && trustedProxyIps.includes(peer)) {
+    const realIp = c.req.header('x-real-ip')?.trim();
+    if (realIp !== undefined && isIP(realIp) !== 0) return `ip:${realIp}`;
   }
-
-  if (trustProxy) {
-    const forwardedFor = c.req.header('x-forwarded-for');
-    const firstIp = forwardedFor?.split(',')[0]?.trim();
-    if (firstIp !== undefined && firstIp.length > 0) {
-      return `ip:${firstIp}`;
-    }
-  }
-
-  const realIp = c.req.header('x-real-ip')?.trim();
-  if (realIp !== undefined && realIp.length > 0) {
-    return `ip:${realIp}`;
-  }
-
-  return 'ip:anonymous';
+  return `ip:${peer ?? 'unknown'}`;
 }
 
 export function createRateLimiter(options: RateLimiterOptions) {
   const store = options.store ?? new InMemoryRateLimitStore();
-  const trustProxy = options.trustProxy ?? false;
+  const trustedProxyIps = options.trustedProxyIps ?? env.TRUSTED_PROXY_IPS;
 
   return createMiddleware<AppEnv>(async (c, next) => {
     const clientId =
       options.keyGenerator !== undefined
         ? options.keyGenerator(c)
-        : defaultClientKey(c, trustProxy);
+        : defaultClientKey(c, trustedProxyIps);
     const key = `${options.keyPrefix}:${clientId}`;
 
     const state = await store.increment(key, options.windowMs);

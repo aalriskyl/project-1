@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
+import { ok, okPage } from '@/lib/response.ts';
 import { requireAuth } from '@/middlewares/auth.ts';
 import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
 import { publicCache } from '@/middlewares/cache-control.ts';
@@ -11,6 +12,7 @@ import {
   ArticleSlugParamSchema,
   CreateArticleBodySchema,
   GetArticleQuerySchema,
+  ListAdminArticlesQuerySchema,
   ListArticlesQuerySchema,
   UpdateArticleBodySchema,
 } from '@/modules/articles/articles.schema.ts';
@@ -21,7 +23,9 @@ const listPublishedArticlesRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Articles'],
-  summary: 'List published SEO articles with cursor pagination and optional tag filter',
+  summary: 'List Articles',
+  description:
+    'List published SEO articles with cursor pagination, optional `?tag=`, and `?q=` fuzzy search.',
   request: {
     query: ListArticlesQuerySchema,
   },
@@ -41,7 +45,9 @@ const getPublishedArticleBySlugRoute = createRoute({
   method: 'get',
   path: '/{slug}',
   tags: ['Articles'],
-  summary: 'Get a published SEO article by slug (Markdown + SEO meta + related products/articles)',
+  summary: 'Get Article by Slug',
+  description:
+    'Fetch a published SEO article by slug including Markdown, SEO metadata, and related products/articles.',
   request: {
     params: ArticleSlugParamSchema,
     query: GetArticleQuerySchema,
@@ -66,14 +72,16 @@ const listAdminArticlesRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Admin - Articles'],
-  summary: 'List all non-deleted articles including drafts (admin)',
+  summary: 'Admin: List Articles',
+  description:
+    'List all non-deleted articles (including drafts) with cursor or optional numbered `?page=` pagination, `?tag=`, and `?q=` fuzzy search.',
   security: [{ BearerAuth: [] }],
   request: {
-    query: ListArticlesQuerySchema,
+    query: ListAdminArticlesQuerySchema,
   },
   responses: {
     200: {
-      description: 'Cursor-paginated admin articles list',
+      description: 'Paginated admin articles list',
       content: { 'application/json': { schema: ArticleCursorPageSchema } },
     },
     401: {
@@ -84,6 +92,10 @@ const listAdminArticlesRoute = createRoute({
       description: 'Admin privileges required',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    422: {
+      description: 'Invalid pagination or query parameters',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
   },
 });
 
@@ -91,7 +103,8 @@ const getAdminArticleByIdRoute = createRoute({
   method: 'get',
   path: '/{id}',
   tags: ['Admin - Articles'],
-  summary: 'Get any article (draft or published) by ID (admin)',
+  summary: 'Admin: Get Article by ID',
+  description: 'Fetch any article (draft or published) by ID.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ArticleIdParamSchema,
@@ -120,7 +133,8 @@ const createArticleRoute = createRoute({
   method: 'post',
   path: '/',
   tags: ['Admin - Articles'],
-  summary: 'Create an SEO article (admin)',
+  summary: 'Admin: Create Article',
+  description: 'Create a draft or published SEO article.',
   security: [{ BearerAuth: [] }],
   request: {
     body: {
@@ -156,7 +170,8 @@ const updateArticleRoute = createRoute({
   method: 'patch',
   path: '/{id}',
   tags: ['Admin - Articles'],
-  summary: 'Update or publish/unpublish an article (admin)',
+  summary: 'Admin: Update Article',
+  description: 'Update article content, SEO metadata, or publish/unpublish state.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ArticleIdParamSchema,
@@ -197,7 +212,8 @@ const deleteArticleRoute = createRoute({
   method: 'delete',
   path: '/{id}',
   tags: ['Admin - Articles'],
-  summary: 'Soft-delete an article (admin)',
+  summary: 'Admin: Delete Article',
+  description: 'Soft-delete an article.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ArticleIdParamSchema,
@@ -230,19 +246,13 @@ export function createPublicArticlesRoutes(articlesService: ArticlesService) {
     .openapi(listPublishedArticlesRoute, async (c) => {
       const query = c.req.valid('query');
       const page = await articlesService.listPublishedArticles(query);
-      return c.json(
-        {
-          data: [...page.data],
-          meta: page.meta,
-        },
-        200,
-      );
+      return c.json(okPage(page, 'Articles retrieved successfully'), 200);
     })
     .openapi(getPublishedArticleBySlugRoute, async (c) => {
       const { slug } = c.req.valid('param');
       const query = c.req.valid('query');
       const data = await articlesService.getPublishedArticleBySlug(slug, query);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Article retrieved successfully'), 200);
     });
 }
 
@@ -260,32 +270,26 @@ export function createAdminArticlesRoutes(
       const actor = getRequiredAdmin(c);
       const query = c.req.valid('query');
       const page = await articlesService.listAdminArticles(actor, query);
-      return c.json(
-        {
-          data: [...page.data],
-          meta: page.meta,
-        },
-        200,
-      );
+      return c.json(okPage(page, 'Articles retrieved successfully'), 200);
     })
     .openapi(getAdminArticleByIdRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const { id } = c.req.valid('param');
       const data = await articlesService.getAdminArticleById(actor, id);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Article retrieved successfully'), 200);
     })
     .openapi(createArticleRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const body = c.req.valid('json');
       const data = await articlesService.createArticle(actor, body);
-      return c.json({ data }, 201);
+      return c.json(ok(data, 'Article created successfully'), 201);
     })
     .openapi(updateArticleRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const { id } = c.req.valid('param');
       const body = c.req.valid('json');
       const data = await articlesService.updateArticle(actor, id, body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Article updated successfully'), 200);
     })
     .openapi(deleteArticleRoute, async (c) => {
       const actor = getRequiredAdmin(c);

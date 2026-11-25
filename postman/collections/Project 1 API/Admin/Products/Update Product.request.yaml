@@ -1,0 +1,32 @@
+$kind: http-request
+method: PATCH
+url: '{{baseUrl}}/v1/admin/products/:id'
+order: 4200
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: id
+    value: '{{productId}}'
+    description: Product UUIDv7
+body:
+  type: json
+  content: |-
+    {
+      "stock": 5,
+      "isFeatured": true,
+      "focusKeyword": "genset 30 kva silent perkins",
+      "noIndex": false
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns updated product envelope', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.id).to.be.a('string');
+      });

@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
+import { ok } from '@/lib/response.ts';
 import {
   AuthSessionEnvelopeSchema,
   ForgotPasswordBodySchema,
@@ -14,6 +15,7 @@ import {
 } from '@/modules/auth/auth.schema.ts';
 import type { AuthService } from '@/modules/auth/auth.service.ts';
 import type { AppEnv } from '@/types/app.ts';
+import { getRequiredUser, requireAuth } from '@/middlewares/auth.ts';
 
 const registerRoute = createRoute({
   method: 'post',
@@ -98,7 +100,8 @@ const googleLoginRoute = createRoute({
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
     409: {
-      description: 'Email already linked to a different Google identity',
+      description:
+        'Existing account requires explicit authenticated linking, or identity conflicts',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
     422: {
@@ -110,6 +113,13 @@ const googleLoginRoute = createRoute({
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
+});
+
+const googleLinkRoute = createRoute({
+  ...googleLoginRoute,
+  path: '/google/link',
+  summary: 'Link Google to the authenticated account with a matching email',
+  security: [{ BearerAuth: [] }],
 });
 
 const forgotPasswordRoute = createRoute({
@@ -134,6 +144,10 @@ const forgotPasswordRoute = createRoute({
     },
     429: {
       description: 'Auth rate limit exceeded',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    503: {
+      description: 'Password reset mail delivery is not configured',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
@@ -229,33 +243,39 @@ const logoutRoute = createRoute({
 export function createAuthRoutes(
   authService: AuthService,
   authRateLimiter?: MiddlewareHandler<AppEnv>,
+  authMiddleware: MiddlewareHandler<AppEnv> = requireAuth,
 ) {
   const router = new OpenAPIHono<AppEnv>({ defaultHook: defaultOpenApiHook });
 
   if (authRateLimiter !== undefined) {
     router.use('*', authRateLimiter);
   }
+  router.use('/google/link', authMiddleware);
 
   return router
     .openapi(registerRoute, async (c) => {
       const body = c.req.valid('json');
       const data = await authService.register(body);
-      return c.json({ data }, 201);
+      return c.json(ok(data, 'Account registered successfully'), 201);
     })
     .openapi(loginRoute, async (c) => {
       const body = c.req.valid('json');
       const data = await authService.login(body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Logged in successfully'), 200);
     })
     .openapi(googleLoginRoute, async (c) => {
       const body = c.req.valid('json');
       const data = await authService.googleLogin(body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Signed in with Google successfully'), 200);
+    })
+    .openapi(googleLinkRoute, async (c) => {
+      const data = await authService.linkGoogle(getRequiredUser(c), c.req.valid('json'));
+      return c.json(ok(data, 'Google account linked successfully'), 200);
     })
     .openapi(forgotPasswordRoute, async (c) => {
       const body = c.req.valid('json');
       const data = await authService.forgotPassword(body);
-      return c.json({ data }, 202);
+      return c.json(ok(data, data.message), 202);
     })
     .openapi(resetPasswordRoute, async (c) => {
       const body = c.req.valid('json');
@@ -265,7 +285,7 @@ export function createAuthRoutes(
     .openapi(refreshRoute, async (c) => {
       const body = c.req.valid('json');
       const data = await authService.refresh(body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Tokens refreshed successfully'), 200);
     })
     .openapi(logoutRoute, async (c) => {
       const body = c.req.valid('json');

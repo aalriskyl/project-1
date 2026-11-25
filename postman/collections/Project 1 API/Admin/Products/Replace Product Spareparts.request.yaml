@@ -1,0 +1,34 @@
+$kind: http-request
+method: PUT
+url: '{{baseUrl}}/v1/admin/products/:id/spareparts'
+order: 4400
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: id
+    value: '{{productId}}'
+    description: Parent equipment product UUIDv7
+body:
+  type: json
+  content: |-
+    {
+      "items": [
+        {
+          "sparepartProductId": "{{sparepartProductId}}",
+          "note": "Ganti setiap 250 jam operasi"
+        }
+      ]
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns updated sparepart links', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data).to.be.an('array');
+      });

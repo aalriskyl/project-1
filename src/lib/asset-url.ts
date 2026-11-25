@@ -63,7 +63,12 @@ export function isAllowedAssetImageUrl(
 
   if (policy.supabaseUrl !== undefined) {
     const prefix = buildStoragePublicPrefix(policy.supabaseUrl, policy.bucket);
-    if (rawUrl.startsWith(prefix) && rawUrl.length > prefix.length) {
+    if (
+      parsed.href.startsWith(prefix) &&
+      parsed.href.length > prefix.length &&
+      !parsed.username &&
+      !parsed.password
+    ) {
       return true;
     }
   }
@@ -108,6 +113,7 @@ export function isAllowedAssetVideoUrl(
 export function extractReferencedObjectPaths(
   textsAndUrls: readonly (string | null | undefined)[],
   bucket: string = env.SUPABASE_STORAGE_BUCKET,
+  origin: string | undefined = env.SUPABASE_URL,
 ): Set<string> {
   const marker = `/storage/v1/object/public/${encodeURIComponent(bucket)}/`;
   const found = new Set<string>();
@@ -117,11 +123,17 @@ export function extractReferencedObjectPaths(
     if (!entry) continue;
     const matches = entry.match(urlPattern) ?? [];
     for (const candidate of matches) {
+      if (!URL.canParse(candidate)) continue;
+      if (origin !== undefined && new URL(candidate).origin !== new URL(origin).origin) continue;
       const idx = candidate.indexOf(marker);
       if (idx !== -1) {
         const rawPath = candidate.slice(idx + marker.length).split(/[?#]/)[0];
         if (rawPath !== undefined && rawPath.length > 0) {
-          found.add(decodeURIComponent(rawPath));
+          try {
+            found.add(decodeURIComponent(rawPath));
+          } catch {
+            /* Ignore malformed URLs in prose without aborting cleanup. */
+          }
         }
       }
     }
@@ -137,3 +149,23 @@ export const AssetImageUrlSchema = z.url().refine((val) => isAllowedAssetImageUr
 export const AssetVideoUrlSchema = z.url().refine((val) => isAllowedAssetVideoUrl(val), {
   message: 'Video URL must be a YouTube link or belong to the configured Storage bucket',
 });
+
+export const CanonicalUrlSchema = z
+  .url()
+  .max(2_048)
+  .refine(
+    (raw) => {
+      try {
+        const parsed = new URL(raw);
+        if (parsed.protocol === 'https:') return true;
+        return (
+          env.NODE_ENV !== 'production' &&
+          parsed.protocol === 'http:' &&
+          (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+        );
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Canonical URL must use https://' },
+  );

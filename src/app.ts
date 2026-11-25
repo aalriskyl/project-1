@@ -7,10 +7,12 @@ import { timeout } from 'hono/timeout';
 import { env } from '@/config/env.ts';
 import { checkDbReadiness, db } from '@/db/client.ts';
 import { defaultOpenApiHook, ErrorResponseSchema, ServiceUnavailableError } from '@/lib/errors.ts';
+import { createSuccessEnvelopeSchema, ok } from '@/lib/response.ts';
 import { errorHandler, notFoundHandler } from '@/middlewares/error-handler.ts';
 import { requestLoggerMiddleware } from '@/middlewares/logger.ts';
 import { createRateLimiter, type RateLimitStore } from '@/middlewares/rate-limit.ts';
 import { requestIdMiddleware } from '@/middlewares/request-id.ts';
+import { redisRateLimitStore } from '@/lib/redis-rate-limit.ts';
 import { createArticlesRepository } from '@/modules/articles/articles.repository.ts';
 import {
   type ArticlesService,
@@ -34,12 +36,13 @@ import { createUsersService, type UsersService } from '@/modules/users/users.ser
 import type { AppEnv } from '@/types/app.ts';
 import { createV1Routes } from '@/v1/routes.ts';
 
-const HealthResponseSchema = z
-  .object({
+const HealthResponseSchema = createSuccessEnvelopeSchema(
+  z.object({
     status: z.enum(['ok', 'ready']).openapi({ example: 'ok' }),
     timestamp: z.iso.datetime().openapi({ example: '2026-11-24T06:00:00.000Z' }),
-  })
-  .openapi('HealthResponse');
+  }),
+  'HealthResponse',
+);
 
 const healthRoute = createRoute({
   method: 'get',
@@ -108,19 +111,20 @@ export function createApp(deps: AppDependencies = {}) {
   const mediaService = deps.mediaService ?? createMediaService(createMediaRepository(db));
   const checkReadiness = deps.checkReadiness ?? (() => checkDbReadiness(db));
   const windowMs = deps.rateLimitWindowMs ?? env.RATE_LIMIT_WINDOW_MS;
+  const rateLimitStore = deps.rateLimitStore ?? redisRateLimitStore;
 
   const globalRateLimiter = createRateLimiter({
     windowMs,
     max: deps.globalRateLimitMax ?? env.RATE_LIMIT_MAX,
     keyPrefix: 'global',
-    ...(deps.rateLimitStore !== undefined ? { store: deps.rateLimitStore } : {}),
+    ...(rateLimitStore !== undefined ? { store: rateLimitStore } : {}),
   });
 
   const authRateLimiter = createRateLimiter({
     windowMs,
     max: deps.authRateLimitMax ?? env.AUTH_RATE_LIMIT_MAX,
     keyPrefix: 'auth',
-    ...(deps.rateLimitStore !== undefined ? { store: deps.rateLimitStore } : {}),
+    ...(rateLimitStore !== undefined ? { store: rateLimitStore } : {}),
   });
 
   application.use('*', requestIdMiddleware);
@@ -152,11 +156,10 @@ export function createApp(deps: AppDependencies = {}) {
       onError: (c) =>
         c.json(
           {
-            error: {
-              code: 'PAYLOAD_TOO_LARGE',
-              message: 'Request body exceeds maximum allowed size',
-              requestId: c.get('requestId'),
-            },
+            success: false as const,
+            message: 'Request body exceeds maximum allowed size',
+            errorCode: 'PAYLOAD_TOO_LARGE',
+            requestId: c.get('requestId'),
           },
           413,
         ),
@@ -186,10 +189,13 @@ export function createApp(deps: AppDependencies = {}) {
   const routes = application
     .openapi(healthRoute, (c) =>
       c.json(
-        {
-          status: 'ok' as const,
-          timestamp: new Date().toISOString(),
-        },
+        ok(
+          {
+            status: 'ok' as const,
+            timestamp: new Date().toISOString(),
+          },
+          'Service is healthy',
+        ),
         200,
       ),
     )
@@ -199,10 +205,13 @@ export function createApp(deps: AppDependencies = {}) {
         throw new ServiceUnavailableError('Database is unreachable', 'DB_UNAVAILABLE');
       }
       return c.json(
-        {
-          status: 'ready' as const,
-          timestamp: new Date().toISOString(),
-        },
+        ok(
+          {
+            status: 'ready' as const,
+            timestamp: new Date().toISOString(),
+          },
+          'Service is ready',
+        ),
         200,
       );
     })

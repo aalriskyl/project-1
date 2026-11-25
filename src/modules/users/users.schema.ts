@@ -1,5 +1,7 @@
 import { z } from '@hono/zod-openapi';
-import { createCursorPageSchema, CursorPaginationQuerySchema } from '@/lib/pagination.ts';
+import { AdminPaginationQuerySchema, createCursorPageSchema } from '@/lib/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
+import { SearchQueryParamSchema } from '@/lib/search.ts';
 import { USER_ROLES } from '@/types/app.ts';
 
 export const PhoneE164Schema = z
@@ -12,7 +14,7 @@ export const UserSchema = z
     id: z.uuid().openapi({ example: '01936c8e-7f2a-7000-8000-000000000001' }),
     email: z.email().openapi({ example: 'ada@example.com' }),
     phone: z.string().nullable().openapi({ example: '+6281234567890' }),
-    displayName: z.string().min(1).max(120).openapi({ example: 'Ada Lovelace' }),
+    displayName: z.string().min(1).max(120).openapi({ example: 'Rapienuraim' }),
     role: z.enum(USER_ROLES).openapi({ example: 'user' }),
     createdAt: z.iso.datetime().openapi({ example: '2026-11-24T06:00:00.000Z' }),
     updatedAt: z.iso.datetime().openapi({ example: '2026-11-24T06:00:00.000Z' }),
@@ -21,11 +23,7 @@ export const UserSchema = z
 
 export type PublicUser = z.infer<typeof UserSchema>;
 
-export const UserEnvelopeSchema = z
-  .object({
-    data: UserSchema,
-  })
-  .openapi('UserEnvelope');
+export const UserEnvelopeSchema = createSuccessEnvelopeSchema(UserSchema, 'UserEnvelope');
 
 export const UserIdParamSchema = z.object({
   id: z.uuid().openapi({
@@ -46,7 +44,16 @@ export const UpdateMeBodySchema = z
 
 export type UpdateMeBody = z.infer<typeof UpdateMeBodySchema>;
 
-export const ListUsersQuerySchema = CursorPaginationQuerySchema;
+export const ListUsersQuerySchema = AdminPaginationQuerySchema.extend({
+  q: SearchQueryParamSchema,
+  role: z
+    .enum(USER_ROLES)
+    .optional()
+    .openapi({
+      param: { name: 'role', in: 'query' },
+      description: 'Filter users by role (user or admin)',
+    }),
+});
 export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 
 export const UserCursorPageSchema = createCursorPageSchema(UserSchema, 'UserCursorPage');

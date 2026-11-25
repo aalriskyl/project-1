@@ -6,6 +6,7 @@ import { signAccessToken } from '@/lib/jwt.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import {
+  CategoryCursorPageSchema,
   CategoryDetailEnvelopeSchema,
   CategoryEnvelopeSchema,
   CategoryListEnvelopeSchema,
@@ -41,6 +42,7 @@ describe('CatalogService (unit)', () => {
     await expect(
       service.createCategory(regularActor, {
         name: 'Forbidden Cat',
+        noIndex: false,
         specSchema: [],
         sortOrder: 0,
         isActive: true,
@@ -49,6 +51,7 @@ describe('CatalogService (unit)', () => {
 
     const root = await service.createCategory(adminActor, {
       name: 'Genset Silent',
+      noIndex: false,
       specSchema: [
         {
           key: 'rated_power_kva',
@@ -68,6 +71,7 @@ describe('CatalogService (unit)', () => {
     const child = await service.createCategory(adminActor, {
       parentId: root.id,
       name: 'Engine Perkins',
+      noIndex: false,
       specSchema: [
         {
           key: 'voltage',
@@ -87,6 +91,7 @@ describe('CatalogService (unit)', () => {
       service.createCategory(adminActor, {
         parentId: child.id,
         name: 'Too Deep Level 3',
+        noIndex: false,
         specSchema: [],
         sortOrder: 1,
         isActive: true,
@@ -206,10 +211,37 @@ describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/s
     expect(slugDetail.data.effectiveSpecSchema).toHaveLength(1);
     expect(slugDetail.data.effectiveSpecSchema[0]?.key).toBe('power_watt');
 
+    // Fuzzy search with typo ('mixr') matches subcategory 'Hand Mixer' and keeps its parent in tree mode
+    const fuzzyCatRes = await testApp.request('/v1/categories?tree=true&q=mixr');
+    expect(fuzzyCatRes.status).toBe(200);
+    const fuzzyCatData = CategoryListEnvelopeSchema.parse(await fuzzyCatRes.json());
+    expect(fuzzyCatData.data).toHaveLength(1);
+    const fuzzyRoot = fuzzyCatData.data[0];
+    expect(fuzzyRoot !== undefined && 'children' in fuzzyRoot && fuzzyRoot.children[0]?.slug).toBe(
+      'hand-mixer',
+    );
+
     const sitemapRes = await testApp.request('/v1/seo/sitemap');
     expect(sitemapRes.status).toBe(200);
     const sitemap = SitemapResponseSchema.parse(await sitemapRes.json());
     expect(sitemap.data.categories).toHaveLength(2);
     expect(sitemap.data.products).toHaveLength(0);
+
+    // Admin categories supports optional ?page= with total/totalPages and rejects cursor+page together
+    const adminPageRes = await testApp.request('/v1/admin/categories?page=1&limit=1', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(adminPageRes.status).toBe(200);
+    const adminPage = CategoryCursorPageSchema.parse(await adminPageRes.json());
+    expect(adminPage.data).toHaveLength(1);
+    expect(adminPage.meta.page).toBe(1);
+    expect(adminPage.meta.total).toBe(2);
+    expect(adminPage.meta.totalPages).toBe(2);
+    expect(adminPage.meta.hasMore).toBe(true);
+
+    const badComboRes = await testApp.request('/v1/admin/categories?page=1&cursor=abc', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(badComboRes.status).toBe(422);
   });
 });

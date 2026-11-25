@@ -1,10 +1,12 @@
 import { env } from '@/config/env.ts';
 import { generateOpaqueToken, hashTokenSha256 } from '@/lib/crypto.ts';
-import { ConflictError, UnauthorizedError } from '@/lib/errors.ts';
+import { ConflictError, ServiceUnavailableError, UnauthorizedError } from '@/lib/errors.ts';
+import type { AuthUser } from '@/types/app.ts';
 import { type GoogleTokenVerifier, googleTokenVerifier } from '@/lib/google-oauth.ts';
 import { generateId } from '@/lib/id.ts';
 import { type JwtConfig, signAccessToken } from '@/lib/jwt.ts';
-import { type MailProvider, mailProvider } from '@/lib/mailer.ts';
+import { type MailProvider } from '@/lib/mailer.ts';
+import { encryptMail } from '@/lib/mail-outbox-crypto.ts';
 import { hashPassword, verifyAgainstDummyPassword, verifyPassword } from '@/lib/password.ts';
 import type { AuthRepository, NewRefreshTokenInput } from '@/modules/auth/auth.repository.ts';
 import type {
@@ -36,6 +38,7 @@ export interface AuthService {
   register(input: RegisterBody): Promise<AuthSession>;
   login(input: LoginBody): Promise<AuthSession>;
   googleLogin(input: GoogleLoginBody): Promise<AuthSession>;
+  linkGoogle(actor: AuthUser, input: GoogleLoginBody): Promise<AuthSession>;
   forgotPassword(input: ForgotPasswordBody): Promise<{ readonly message: string }>;
   resetPassword(input: ResetPasswordBody): Promise<void>;
   refresh(input: RefreshBody): Promise<AuthSession>;
@@ -72,7 +75,7 @@ export function createAuthService(
   const passwordResetTtlSec = options.passwordResetTtlSec ?? env.PASSWORD_RESET_TTL_SEC;
   const appPublicUrl = (options.appPublicUrl ?? env.APP_PUBLIC_URL).replace(/\/+$/, '');
   const googleVerifier = options.googleVerifier ?? googleTokenVerifier;
-  const mailer = options.mailer ?? mailProvider;
+  const mailer = options.mailer;
 
   async function buildSessionResponse(
     user: UserEntity,
@@ -173,25 +176,10 @@ export function createAuthService(
 
       const existingByEmail = await authRepo.findUserByEmailWithCredentials(identity.email);
       if (existingByEmail !== null) {
-        if (existingByEmail.googleSub !== null && existingByEmail.googleSub !== identity.sub) {
-          throw new ConflictError(
-            'This email is already linked to a different Google account',
-            'GOOGLE_SUB_MISMATCH',
-          );
-        }
-
-        const familyId = generateId();
-        const { rawRefreshToken, record } = buildRefreshTokenCandidate(
-          existingByEmail.id,
-          familyId,
-          refreshTokenTtlSec,
+        throw new ConflictError(
+          'Sign in to your existing account before linking Google',
+          'GOOGLE_LINK_REQUIRED',
         );
-        const linkedUser = await authRepo.linkGoogleSubAndInsertRefreshToken({
-          userId: existingByEmail.id,
-          googleSub: identity.sub,
-          refreshToken: record,
-        });
-        return buildSessionResponse(linkedUser, rawRefreshToken);
       }
 
       const userId = generateId();
@@ -217,7 +205,37 @@ export function createAuthService(
       return buildSessionResponse(createdUser, rawRefreshToken);
     },
 
+    async linkGoogle(actor: AuthUser, input: GoogleLoginBody): Promise<AuthSession> {
+      const identity = await googleVerifier.verifyIdToken(input.idToken);
+      const existing = await authRepo.findUserByEmailWithCredentials(identity.email);
+      if (existing === null || existing.id !== actor.id) {
+        throw new ConflictError(
+          'Google email must match the authenticated account',
+          'GOOGLE_ACCOUNT_MISMATCH',
+        );
+      }
+      const { rawRefreshToken, record } = buildRefreshTokenCandidate(
+        actor.id,
+        generateId(),
+        refreshTokenTtlSec,
+      );
+      const linked = await authRepo.linkGoogleSubAndInsertRefreshToken({
+        userId: actor.id,
+        googleSub: identity.sub,
+        refreshToken: record,
+      });
+      return buildSessionResponse(linked, rawRefreshToken);
+    },
+
     async forgotPassword(input: ForgotPasswordBody): Promise<{ readonly message: string }> {
+      if (
+        mailer === undefined &&
+        (env.MAIL_OUTBOX_ENCRYPTION_KEY === undefined || env.RESEND_API_KEY === undefined)
+      )
+        throw new ServiceUnavailableError(
+          'Password reset email is not configured',
+          'MAIL_NOT_CONFIGURED',
+        );
       const existing = await authRepo.findUserByEmailWithCredentials(input.email);
       if (existing === null) {
         return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
@@ -227,20 +245,28 @@ export function createAuthService(
       const tokenHash = hashTokenSha256(rawResetToken);
       const expiresAt = new Date(Date.now() + passwordResetTtlSec * 1000);
 
-      await authRepo.createPasswordResetToken({
-        id: generateId(),
-        userId: existing.id,
-        tokenHash,
-        expiresAt,
-      });
-
+      const id = generateId();
       const resetUrl = `${appPublicUrl}/auth/reset-password?token=${encodeURIComponent(rawResetToken)}`;
-      await mailer.sendPasswordResetEmail({
+      const email = {
         to: existing.email,
         displayName: existing.displayName,
         resetUrl,
         expiresInMinutes: Math.max(1, Math.round(passwordResetTtlSec / 60)),
-      });
+      };
+      const delivery =
+        mailer === undefined && env.MAIL_OUTBOX_ENCRYPTION_KEY !== undefined
+          ? { id, payload: await encryptMail(email, env.MAIL_OUTBOX_ENCRYPTION_KEY), expiresAt }
+          : undefined;
+      await authRepo.createPasswordResetToken(
+        {
+          id,
+          userId: existing.id,
+          tokenHash,
+          expiresAt,
+        },
+        delivery,
+      );
+      if (mailer !== undefined) await mailer.sendPasswordResetEmail(email);
 
       return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
     },

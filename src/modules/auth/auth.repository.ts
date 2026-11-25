@@ -1,9 +1,10 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import postgres from 'postgres';
 import type { Database } from '@/db/client.ts';
 import { passwordResetTokens } from '@/db/schema/password-reset-tokens.ts';
 import { refreshTokens } from '@/db/schema/refresh-tokens.ts';
 import { users } from '@/db/schema/users.ts';
+import { mailOutbox, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
 import { ConflictError } from '@/lib/errors.ts';
 import type { UserEntity, UserWithCredentials } from '@/modules/users/users.repository.ts';
 import type { UserRole } from '@/types/app.ts';
@@ -70,7 +71,10 @@ export interface AuthRepository {
   }): Promise<boolean>;
   revokeTokenFamily(familyId: string, revokedAt: Date): Promise<void>;
   revokeTokenByHash(tokenHash: string, revokedAt: Date): Promise<void>;
-  createPasswordResetToken(input: NewPasswordResetTokenInput): Promise<void>;
+  createPasswordResetToken(
+    input: NewPasswordResetTokenInput,
+    delivery?: NewMailDelivery,
+  ): Promise<void>;
   consumePasswordResetTokenAndUpdatePassword(params: {
     readonly tokenHash: string;
     readonly passwordHash: string;
@@ -214,11 +218,19 @@ export function createAuthRepository(db: Database): AuthRepository {
           const [updated] = await tx
             .update(users)
             .set({ googleSub, updatedAt: new Date() })
-            .where(eq(users.id, userId))
+            .where(
+              and(
+                eq(users.id, userId),
+                or(isNull(users.googleSub), eq(users.googleSub, googleSub)),
+              ),
+            )
             .returning(userPublicCols);
 
           if (updated === undefined) {
-            throw new Error('User not found when linking Google account');
+            throw new ConflictError(
+              'Account is already linked to another Google identity',
+              'GOOGLE_SUB_MISMATCH',
+            );
           }
 
           await tx.insert(refreshTokens).values({
@@ -339,12 +351,18 @@ export function createAuthRepository(db: Database): AuthRepository {
         .where(and(eq(refreshTokens.tokenHash, tokenHash), isNull(refreshTokens.revokedAt)));
     },
 
-    async createPasswordResetToken(input: NewPasswordResetTokenInput): Promise<void> {
-      await db.insert(passwordResetTokens).values({
-        id: input.id,
-        userId: input.userId,
-        tokenHash: input.tokenHash,
-        expiresAt: input.expiresAt,
+    async createPasswordResetToken(
+      input: NewPasswordResetTokenInput,
+      delivery?: NewMailDelivery,
+    ): Promise<void> {
+      await db.transaction(async (tx) => {
+        await tx.insert(passwordResetTokens).values({
+          id: input.id,
+          userId: input.userId,
+          tokenHash: input.tokenHash,
+          expiresAt: input.expiresAt,
+        });
+        if (delivery !== undefined) await tx.insert(mailOutbox).values(delivery);
       });
     },
 

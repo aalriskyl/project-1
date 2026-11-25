@@ -1,11 +1,13 @@
 import { env } from '@/config/env.ts';
 import { logger } from '@/lib/logger.ts';
+import { ServiceUnavailableError } from '@/lib/errors.ts';
 
 export interface PasswordResetEmailInput {
   readonly to: string;
   readonly displayName: string;
   readonly resetUrl: string;
   readonly expiresInMinutes: number;
+  readonly idempotencyKey?: string;
 }
 
 export interface MailProvider {
@@ -16,6 +18,7 @@ export interface ResendMailConfig {
   readonly apiKey?: string;
   readonly from: string;
   readonly timeoutMs?: number;
+  readonly fetch?: typeof fetch;
 }
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
@@ -35,14 +38,10 @@ export function createMailProvider(
   return {
     async sendPasswordResetEmail(input: PasswordResetEmailInput): Promise<void> {
       if (config.apiKey === undefined) {
-        logger.info(
-          {
-            recipient: input.to,
-            expiresInMinutes: input.expiresInMinutes,
-          },
-          'RESEND_API_KEY not set; skipped outbound password reset email dispatch',
+        throw new ServiceUnavailableError(
+          'Email delivery is not configured',
+          'MAIL_NOT_CONFIGURED',
         );
-        return;
       }
 
       const subject = 'Reset your Tsuzumi Japan password';
@@ -55,11 +54,14 @@ export function createMailProvider(
         'If you did not request this, you can safely ignore this email.',
       ].join('\n');
 
-      const response = await fetch(RESEND_ENDPOINT, {
+      const response = await (config.fetch ?? fetch)(RESEND_ENDPOINT, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           'Content-Type': 'application/json',
+          ...(input.idempotencyKey !== undefined
+            ? { 'Idempotency-Key': input.idempotencyKey }
+            : {}),
         },
         body: JSON.stringify({
           from: config.from,
@@ -71,9 +73,10 @@ export function createMailProvider(
       });
 
       if (!response.ok) {
-        logger.error(
-          { status: response.status, recipient: input.to },
-          'resend password reset email failed',
+        logger.error({ status: response.status }, 'resend password reset email failed');
+        throw new ServiceUnavailableError(
+          'Email provider rejected delivery',
+          'MAIL_DELIVERY_FAILED',
         );
       }
     },

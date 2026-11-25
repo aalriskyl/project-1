@@ -18,58 +18,76 @@
       "HealthResponse": {
         "type": "object",
         "properties": {
-          "status": {
-            "type": "string",
+          "success": {
+            "type": "boolean",
             "enum": [
-              "ok",
-              "ready"
-            ],
-            "example": "ok"
+              true
+            ]
           },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "example": "2026-11-24T06:00:00.000Z"
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "ready"
+                ],
+                "example": "ok"
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2026-11-24T06:00:00.000Z"
+              }
+            },
+            "required": [
+              "status",
+              "timestamp"
+            ]
           }
         },
         "required": [
-          "status",
-          "timestamp"
+          "success",
+          "message",
+          "data"
         ]
       },
       "ErrorResponse": {
         "type": "object",
         "properties": {
-          "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string",
-                "example": "VALIDATION_ERROR"
-              },
-              "message": {
-                "type": "string",
-                "example": "Request validation failed"
-              },
-              "requestId": {
-                "type": "string",
-                "example": "01936c8e-7f2a-7000-8000-000000000001"
-              },
-              "details": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ValidationIssue"
-                }
-              }
-            },
-            "required": [
-              "code",
-              "message"
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
             ]
+          },
+          "message": {
+            "type": "string",
+            "example": "Request validation failed"
+          },
+          "errorCode": {
+            "type": "string",
+            "example": "VALIDATION_ERROR"
+          },
+          "requestId": {
+            "type": "string",
+            "example": "01936c8e-7f2a-7000-8000-000000000001"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            }
           }
         },
         "required": [
-          "error"
+          "success",
+          "message",
+          "errorCode"
         ]
       },
       "ValidationIssue": {
@@ -92,11 +110,22 @@
       "AuthSessionEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/AuthSession"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -139,7 +168,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 120,
-            "example": "Ada Lovelace"
+            "example": "Rapienuraim"
           },
           "role": {
             "type": "string",
@@ -275,6 +304,15 @@
       "ForgotPasswordEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "object",
             "properties": {
@@ -288,6 +326,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -359,11 +399,22 @@
       "UserEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/User"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -390,6 +441,15 @@
       "UserCursorPage": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -412,6 +472,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
@@ -422,6 +494,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data",
           "meta"
         ]
@@ -429,6 +503,15 @@
       "CategoryListEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -444,6 +527,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -556,6 +641,28 @@
               "null"
             ]
           },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "genset silent"
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "noIndex": {
+            "type": "boolean"
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "imageUrl": {
             "type": [
               "string",
@@ -597,6 +704,10 @@
           "description",
           "metaTitle",
           "metaDescription",
+          "focusKeyword",
+          "canonicalUrl",
+          "noIndex",
+          "ogImageUrl",
           "imageUrl",
           "bannerImageUrl",
           "specSchema",
@@ -609,11 +720,22 @@
       "CategoryDetailEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/CategoryDetail"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -675,6 +797,15 @@
       "ProductReviewCursorPage": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -697,6 +828,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
@@ -707,6 +850,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data",
           "meta"
         ]
@@ -779,11 +924,22 @@
       "ProductReviewEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/ProductReview"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -804,11 +960,8 @@
             "maxLength": 2000
           },
           "orderId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
+            "type": "null",
+            "description": "Reserved for future server-verified purchases. Omit or send null."
           }
         },
         "required": [
@@ -819,6 +972,15 @@
       "ProductCursorPage": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -841,6 +1003,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
@@ -851,6 +1025,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data",
           "meta"
         ]
@@ -966,6 +1142,15 @@
       "CompareProductsEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "object",
             "properties": {
@@ -989,6 +1174,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -1013,6 +1200,27 @@
                 ]
               },
               "metaDescription": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "focusKeyword": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "canonicalUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "noIndex": {
+                "type": "boolean"
+              },
+              "ogImageUrl": {
                 "type": [
                   "string",
                   "null"
@@ -1053,6 +1261,10 @@
               "descriptionMd",
               "metaTitle",
               "metaDescription",
+              "focusKeyword",
+              "canonicalUrl",
+              "noIndex",
+              "ogImageUrl",
               "media",
               "specs",
               "effectiveSpecSchema",
@@ -1168,6 +1380,15 @@
       "ProductCardListEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -1176,12 +1397,23 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
       "SparepartCursorPage": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -1204,6 +1436,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
@@ -1214,6 +1458,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data",
           "meta"
         ]
@@ -1221,17 +1467,37 @@
       "ProductDetailEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/ProductDetail"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
       "ArticleCursorPage": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "array",
             "items": {
@@ -1254,6 +1520,18 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": [
@@ -1264,6 +1542,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data",
           "meta"
         ]
@@ -1315,6 +1595,28 @@
               "null"
             ]
           },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "genset silent 30 kva"
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "noIndex": {
+            "type": "boolean"
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -1349,6 +1651,10 @@
           "coverImageUrl",
           "metaTitle",
           "metaDescription",
+          "focusKeyword",
+          "canonicalUrl",
+          "noIndex",
+          "ogImageUrl",
           "tags",
           "isPublished",
           "publishedAt",
@@ -1359,11 +1665,22 @@
       "ArticleDetailEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/ArticleDetail"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -1451,6 +1768,15 @@
       "SitemapResponse": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "type": "object",
             "properties": {
@@ -1481,6 +1807,8 @@
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -1502,14 +1830,87 @@
           "updatedAt"
         ]
       },
+      "CategoryCursorPage": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "nextCursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hasMore": {
+                "type": "boolean"
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "totalPages": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "nextCursor",
+              "hasMore",
+              "limit"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "data",
+          "meta"
+        ]
+      },
       "CategoryEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/Category"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -1555,6 +1956,32 @@
               "null"
             ],
             "maxLength": 320
+          },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean",
+            "default": false
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
           },
           "imageUrl": {
             "type": [
@@ -1635,6 +2062,31 @@
               "null"
             ],
             "maxLength": 320
+          },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean"
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
           },
           "imageUrl": {
             "type": [
@@ -1731,6 +2183,32 @@
               "null"
             ],
             "maxLength": 320
+          },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean",
+            "default": false
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
           },
           "priceIdr": {
             "type": "integer",
@@ -1898,6 +2376,31 @@
             ],
             "maxLength": 320
           },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean"
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
           "priceIdr": {
             "type": "integer",
             "minimum": 0,
@@ -1961,6 +2464,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProductSparepartsListEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductSparepartLinkItem"
+            }
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "data"
+        ]
       },
       "ReplaceSparepartsBody": {
         "type": "object",
@@ -2051,6 +2579,32 @@
             ],
             "maxLength": 320
           },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean",
+            "default": false
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -2128,6 +2682,31 @@
             ],
             "maxLength": 320
           },
+          "focusKeyword": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          },
+          "canonicalUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "noIndex": {
+            "type": "boolean"
+          },
+          "ogImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -2151,20 +2730,78 @@
         },
         "additionalProperties": false
       },
+      "CompletedUploadEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "uploadId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "publicUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified"
+                ]
+              }
+            },
+            "required": [
+              "uploadId",
+              "publicUrl",
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "message",
+          "data"
+        ]
+      },
       "SignedUploadUrlEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/SignedUploadUrl"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
       "SignedUploadUrl": {
         "type": "object",
         "properties": {
+          "uploadId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "bucket": {
             "type": "string",
             "example": "public-assets"
@@ -2211,6 +2848,7 @@
           }
         },
         "required": [
+          "uploadId",
           "bucket",
           "objectPath",
           "uploadUrl",
@@ -2259,11 +2897,22 @@
       "CleanupOrphansEnvelope": {
         "type": "object",
         "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
           "data": {
             "$ref": "#/components/schemas/CleanupOrphansResult"
           }
         },
         "required": [
+          "success",
+          "message",
           "data"
         ]
       },
@@ -2296,7 +2945,7 @@
         "properties": {
           "olderThanHours": {
             "type": "integer",
-            "minimum": 1,
+            "minimum": 3,
             "maximum": 8760,
             "default": 24,
             "example": 24
@@ -2523,7 +3172,82 @@
             }
           },
           "409": {
-            "description": "Email already linked to a different Google identity",
+            "description": "Existing account requires explicit authenticated linking, or identity conflicts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Google OAuth client ID not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/google/link": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Link Google to the authenticated account with a matching email",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleLoginBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated via Google and token pair issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or unverified Google ID token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Existing account requires explicit authenticated linking, or identity conflicts",
             "content": {
               "application/json": {
                 "schema": {
@@ -2594,6 +3318,16 @@
           },
           "429": {
             "description": "Auth rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Password reset mail delivery is not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -2766,7 +3500,8 @@
         "tags": [
           "Users"
         ],
-        "summary": "Get the authenticated user profile",
+        "summary": "Get Current User",
+        "description": "Fetch the authenticated user profile.",
         "security": [
           {
             "BearerAuth": []
@@ -2809,7 +3544,8 @@
         "tags": [
           "Users"
         ],
-        "summary": "Update the authenticated user profile",
+        "summary": "Update Current User",
+        "description": "Update the authenticated user display name or E.164 phone number.",
         "security": [
           {
             "BearerAuth": []
@@ -2864,7 +3600,8 @@
         "tags": [
           "Users"
         ],
-        "summary": "List users with cursor pagination (admin only)",
+        "summary": "Admin: List Users",
+        "description": "List users with cursor or optional numbered `?page=` pagination, `?q=` fuzzy search, and `?role=` filter.",
         "security": [
           {
             "BearerAuth": []
@@ -2895,11 +3632,49 @@
             "description": "Items per page (1..100, default 20)",
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+              "example": 1
+            },
+            "required": false,
+            "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "user",
+                "admin"
+              ],
+              "description": "Filter users by role (user or admin)"
+            },
+            "required": false,
+            "description": "Filter users by role (user or admin)",
+            "name": "role",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Cursor-paginated user list",
+            "description": "Paginated user list",
             "content": {
               "application/json": {
                 "schema": {
@@ -2946,7 +3721,8 @@
         "tags": [
           "Users"
         ],
-        "summary": "Get a user by ID (self or admin)",
+        "summary": "Get User by ID",
+        "description": "Fetch a user profile by ID (restricted to self or admin).",
         "security": [
           {
             "BearerAuth": []
@@ -3023,7 +3799,8 @@
         "tags": [
           "Catalog"
         ],
-        "summary": "List active categories (flat or nested tree)",
+        "summary": "List Categories",
+        "description": "List active categories as a flat list or 2-level nested tree (`?tree=true`) with optional fuzzy search (`?q=`).",
         "parameters": [
           {
             "schema": {
@@ -3040,6 +3817,17 @@
             "required": false,
             "description": "When true, nests subcategories inside root categories under `children`",
             "name": "tree",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
             "in": "query"
           }
         ],
@@ -3072,7 +3860,8 @@
         "tags": [
           "Catalog"
         ],
-        "summary": "Get category detail, subcategories, and effective spec schema by slug",
+        "summary": "Get Category by Slug",
+        "description": "Fetch category detail, child subcategories, and merged `effectiveSpecSchema` by slug.",
         "parameters": [
           {
             "schema": {
@@ -3126,7 +3915,8 @@
         "tags": [
           "Reviews"
         ],
-        "summary": "List published customer reviews for a product with cursor pagination",
+        "summary": "List Product Reviews",
+        "description": "List published customer reviews for a product with cursor pagination.",
         "parameters": [
           {
             "schema": {
@@ -3196,7 +3986,8 @@
         "tags": [
           "Reviews"
         ],
-        "summary": "Submit a customer review for a product and update rating summary",
+        "summary": "Create Product Review",
+        "description": "Submit a customer review (1–5 stars) for a product and recalculate its rating rollup.",
         "security": [
           {
             "BearerAuth": []
@@ -3282,7 +4073,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "List and search active products (zero-join cards + FTS/trigram SKU search)",
+        "summary": "List Products",
+        "description": "List and search active products with cursor pagination, category/brand/price filters, and `?q=` fuzzy search.",
         "parameters": [
           {
             "schema": {
@@ -3397,13 +4189,11 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 120,
-              "description": "Search across product name, SKU, brand, and description",
-              "example": "TPG30 perkins"
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
             },
             "required": false,
-            "description": "Search across product name, SKU, brand, and description",
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
             "name": "q",
             "in": "query"
           }
@@ -3437,7 +4227,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "Compare 2 to 4 products in a single batched query with aligned specSchema rows",
+        "summary": "Compare Products",
+        "description": "Compare 2 to 4 active products in a single batched query with aligned `specSchema` rows.",
         "parameters": [
           {
             "schema": {
@@ -3499,7 +4290,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "List recommended/featured products without slow ORDER BY RANDOM() scans",
+        "summary": "Get Product Recommendations",
+        "description": "List recommended and featured products without expensive `ORDER BY RANDOM()` scans.",
         "parameters": [
           {
             "schema": {
@@ -3561,7 +4353,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "List compatible spare parts for an equipment product",
+        "summary": "List Product Spare Parts",
+        "description": "List compatible spare parts for an equipment product with cursor pagination.",
         "parameters": [
           {
             "schema": {
@@ -3637,7 +4430,8 @@
         "tags": [
           "Products"
         ],
-        "summary": "Get full product detail by slug (media, specs, dimensions, optional spareparts & related)",
+        "summary": "Get Product by Slug",
+        "description": "Fetch full product detail by slug (media, specs, dimensions, SEO metadata, optional `spareparts` & `related`).",
         "parameters": [
           {
             "schema": {
@@ -3700,7 +4494,8 @@
         "tags": [
           "Articles"
         ],
-        "summary": "List published SEO articles with cursor pagination and optional tag filter",
+        "summary": "List Articles",
+        "description": "List published SEO articles with cursor pagination, optional `?tag=`, and `?q=` fuzzy search.",
         "parameters": [
           {
             "schema": {
@@ -3735,6 +4530,17 @@
             "description": "Filter published articles containing this tag",
             "name": "tag",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
+            "in": "query"
           }
         ],
         "responses": {
@@ -3766,7 +4572,8 @@
         "tags": [
           "Articles"
         ],
-        "summary": "Get a published SEO article by slug (Markdown + SEO meta + related products/articles)",
+        "summary": "Get Article by Slug",
+        "description": "Fetch a published SEO article by slug including Markdown, SEO metadata, and related products/articles.",
         "parameters": [
           {
             "schema": {
@@ -3837,7 +4644,8 @@
         "tags": [
           "SEO"
         ],
-        "summary": "Get lightweight slug + updatedAt feed for Next.js app/sitemap.ts",
+        "summary": "Get SEO Sitemap Feed",
+        "description": "Return indexable (`noIndex = false`) slugs and `updatedAt` timestamps for Next.js `app/sitemap.ts`.",
         "responses": {
           "200": {
             "description": "Sitemap entries across categories, products, and articles",
@@ -3857,19 +4665,71 @@
         "tags": [
           "Admin - Catalog"
         ],
-        "summary": "List all non-deleted categories including inactive ones (admin)",
+        "summary": "Admin: List Categories",
+        "description": "List all non-deleted categories (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Opaque cursor returned from the previous page"
+            },
+            "required": false,
+            "description": "Opaque cursor returned from the previous page",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Items per page (1..100, default 20)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Items per page (1..100, default 20)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+              "example": 1
+            },
+            "required": false,
+            "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Admin category list",
+            "description": "Paginated admin category list",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CategoryListEnvelope"
+                  "$ref": "#/components/schemas/CategoryCursorPage"
                 }
               }
             }
@@ -3893,6 +4753,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Invalid pagination or query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -3900,7 +4770,8 @@
         "tags": [
           "Admin - Catalog"
         ],
-        "summary": "Create a category or subcategory (admin)",
+        "summary": "Admin: Create Category",
+        "description": "Create a root category or level-2 subcategory.",
         "security": [
           {
             "BearerAuth": []
@@ -3985,7 +4856,8 @@
         "tags": [
           "Admin - Catalog"
         ],
-        "summary": "Update a category or its spec schema (admin)",
+        "summary": "Admin: Update Category",
+        "description": "Update category metadata, SEO fields, hierarchy, or `specSchema`.",
         "security": [
           {
             "BearerAuth": []
@@ -4079,7 +4951,8 @@
         "tags": [
           "Admin - Catalog"
         ],
-        "summary": "Soft-delete a category (admin)",
+        "summary": "Admin: Delete Category",
+        "description": "Soft-delete a category (rejected with 409 if it still has subcategories or products).",
         "security": [
           {
             "BearerAuth": []
@@ -4148,7 +5021,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "List all non-deleted products including inactive ones (admin)",
+        "summary": "Admin: List Products",
+        "description": "List all non-deleted products (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
@@ -4179,11 +5053,35 @@
             "description": "Items per page (1..100, default 20)",
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+              "example": 1
+            },
+            "required": false,
+            "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Cursor-paginated admin products",
+            "description": "Paginated admin products",
             "content": {
               "application/json": {
                 "schema": {
@@ -4211,6 +5109,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Invalid pagination or query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -4218,7 +5126,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "Create a product with dynamic spec validation against its category schema (admin)",
+        "summary": "Admin: Create Product",
+        "description": "Create a product with dynamic `specs` validation against its category `effectiveSpecSchema`.",
         "security": [
           {
             "BearerAuth": []
@@ -4303,7 +5212,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "Get any product by ID including inactive products (admin)",
+        "summary": "Admin: Get Product by ID",
+        "description": "Fetch any product (active or inactive) by ID.",
         "security": [
           {
             "BearerAuth": []
@@ -4367,7 +5277,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "Update a product (admin)",
+        "summary": "Admin: Update Product",
+        "description": "Update product pricing, stock, media, specs, or SEO fields.",
         "security": [
           {
             "BearerAuth": []
@@ -4461,7 +5372,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "Soft-delete a product (admin)",
+        "summary": "Admin: Delete Product",
+        "description": "Soft-delete a product.",
         "security": [
           {
             "BearerAuth": []
@@ -4520,7 +5432,8 @@
         "tags": [
           "Admin - Products"
         ],
-        "summary": "Atomically replace compatible spare-part links for a product (admin)",
+        "summary": "Admin: Replace Product Spare Parts",
+        "description": "Atomically replace compatible spare-part links for a parent equipment product.",
         "security": [
           {
             "BearerAuth": []
@@ -4553,18 +5466,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ProductSparepartLinkItem"
-                      }
-                    }
-                  },
-                  "required": [
-                    "data"
-                  ]
+                  "$ref": "#/components/schemas/ProductSparepartsListEnvelope"
                 }
               }
             }
@@ -4612,12 +5514,148 @@
         }
       }
     },
+    "/v1/admin/reviews": {
+      "get": {
+        "tags": [
+          "Admin - Reviews"
+        ],
+        "summary": "Admin: List Reviews",
+        "description": "List all product reviews (published and unpublished) with cursor or optional numbered `?page=` pagination and filters.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Opaque cursor returned from the previous page"
+            },
+            "required": false,
+            "description": "Opaque cursor returned from the previous page",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Items per page (1..100, default 20)",
+              "example": 20
+            },
+            "required": false,
+            "description": "Items per page (1..100, default 20)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+              "example": 1
+            },
+            "required": false,
+            "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter reviews by product UUID"
+            },
+            "required": false,
+            "description": "Filter reviews by product UUID",
+            "name": "productId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "Filter reviews by publication status"
+            },
+            "required": false,
+            "description": "Filter reviews by publication status",
+            "name": "isPublished",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Filter reviews by star rating (1..5)"
+            },
+            "required": false,
+            "description": "Filter reviews by star rating (1..5)",
+            "name": "rating",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated product reviews moderation list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductReviewCursorPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin privileges required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter or pagination parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/reviews/{id}": {
       "patch": {
         "tags": [
           "Admin - Reviews"
         ],
-        "summary": "Publish or unpublish a product review and recalculate product rating (admin)",
+        "summary": "Admin: Moderate Review",
+        "description": "Publish or unpublish a product review and recalculate the product rating.",
         "security": [
           {
             "BearerAuth": []
@@ -4691,7 +5729,8 @@
         "tags": [
           "Admin - Reviews"
         ],
-        "summary": "Delete a product review and recalculate product rating (admin)",
+        "summary": "Admin: Delete Review",
+        "description": "Delete a product review and recalculate the product rating.",
         "security": [
           {
             "BearerAuth": []
@@ -4750,7 +5789,8 @@
         "tags": [
           "Admin - Articles"
         ],
-        "summary": "List all non-deleted articles including drafts (admin)",
+        "summary": "Admin: List Articles",
+        "description": "List all non-deleted articles (including drafts) with cursor or optional numbered `?page=` pagination, `?tag=`, and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
@@ -4760,9 +5800,11 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Opaque cursor returned from the previous page"
             },
             "required": false,
+            "description": "Opaque cursor returned from the previous page",
             "name": "cursor",
             "in": "query"
           },
@@ -4770,12 +5812,27 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 50,
-              "default": 10,
-              "example": 10
+              "maximum": 100,
+              "default": 20,
+              "description": "Items per page (1..100, default 20)",
+              "example": 20
             },
             "required": false,
+            "description": "Items per page (1..100, default 20)",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+              "example": 1
+            },
+            "required": false,
+            "description": "Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)",
+            "name": "page",
             "in": "query"
           },
           {
@@ -4783,18 +5840,29 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 48,
-              "description": "Filter published articles containing this tag",
+              "description": "Filter articles containing this tag",
               "example": "genset"
             },
             "required": false,
-            "description": "Filter published articles containing this tag",
+            "description": "Filter articles containing this tag",
             "name": "tag",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Cursor-paginated admin articles list",
+            "description": "Paginated admin articles list",
             "content": {
               "application/json": {
                 "schema": {
@@ -4822,6 +5890,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Invalid pagination or query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -4829,7 +5907,8 @@
         "tags": [
           "Admin - Articles"
         ],
-        "summary": "Create an SEO article (admin)",
+        "summary": "Admin: Create Article",
+        "description": "Create a draft or published SEO article.",
         "security": [
           {
             "BearerAuth": []
@@ -4904,7 +5983,8 @@
         "tags": [
           "Admin - Articles"
         ],
-        "summary": "Get any article (draft or published) by ID (admin)",
+        "summary": "Admin: Get Article by ID",
+        "description": "Fetch any article (draft or published) by ID.",
         "security": [
           {
             "BearerAuth": []
@@ -4968,7 +6048,8 @@
         "tags": [
           "Admin - Articles"
         ],
-        "summary": "Update or publish/unpublish an article (admin)",
+        "summary": "Admin: Update Article",
+        "description": "Update article content, SEO metadata, or publish/unpublish state.",
         "security": [
           {
             "BearerAuth": []
@@ -5062,7 +6143,8 @@
         "tags": [
           "Admin - Articles"
         ],
-        "summary": "Soft-delete an article (admin)",
+        "summary": "Admin: Delete Article",
+        "description": "Soft-delete an article.",
         "security": [
           {
             "BearerAuth": []
@@ -5116,12 +6198,109 @@
         }
       }
     },
+    "/v1/admin/media/{id}/complete": {
+      "post": {
+        "tags": [
+          "Admin - Media"
+        ],
+        "summary": "Verify stored image size, MIME and signature before attachment (idempotent)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified upload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletedUploadEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Upload not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Upload missing, invalid, or being deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid upload ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/media/upload-url": {
       "post": {
         "tags": [
           "Admin - Media"
         ],
-        "summary": "Generate a tracked presigned Supabase Storage upload URL for an image (admin)",
+        "summary": "Admin: Create Upload URL",
+        "description": "Generate a tracked presigned Supabase Storage upload URL for an image.",
         "security": [
           {
             "BearerAuth": []
@@ -5196,7 +6375,8 @@
         "tags": [
           "Admin - Media"
         ],
-        "summary": "Sweep and delete unreferenced Storage uploads older than the grace window (admin / cron)",
+        "summary": "Admin: Cleanup Orphaned Media",
+        "description": "Sweep and delete unreferenced Storage uploads older than the grace window.",
         "security": [
           {
             "BearerAuth": []

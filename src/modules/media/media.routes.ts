@@ -1,11 +1,14 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
+import { ok } from '@/lib/response.ts';
 import { requireAuth } from '@/middlewares/auth.ts';
 import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
 import {
   CleanupOrphansBodySchema,
   CleanupOrphansEnvelopeSchema,
+  CompleteUploadParamSchema,
+  CompletedUploadEnvelopeSchema,
   RequestUploadUrlBodySchema,
   SignedUploadUrlEnvelopeSchema,
 } from '@/modules/media/media.schema.ts';
@@ -16,7 +19,8 @@ const createUploadUrlRoute = createRoute({
   method: 'post',
   path: '/upload-url',
   tags: ['Admin - Media'],
-  summary: 'Generate a tracked presigned Supabase Storage upload URL for an image (admin)',
+  summary: 'Admin: Create Upload URL',
+  description: 'Generate a tracked presigned Supabase Storage upload URL for an image.',
   security: [{ BearerAuth: [] }],
   request: {
     body: {
@@ -48,12 +52,51 @@ const createUploadUrlRoute = createRoute({
   },
 });
 
+const completeUploadRoute = createRoute({
+  method: 'post',
+  path: '/{id}/complete',
+  tags: ['Admin - Media'],
+  summary: 'Verify stored image size, MIME and signature before attachment (idempotent)',
+  security: [{ BearerAuth: [] }],
+  request: { params: CompleteUploadParamSchema },
+  responses: {
+    200: {
+      description: 'Verified upload',
+      content: { 'application/json': { schema: CompletedUploadEnvelopeSchema } },
+    },
+    401: {
+      description: 'Unauthorized',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: 'Admin required',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    404: {
+      description: 'Upload not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    409: {
+      description: 'Upload missing, invalid, or being deleted',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: 'Invalid upload ID',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    503: {
+      description: 'Storage unavailable',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
 const cleanupOrphansRoute = createRoute({
   method: 'post',
   path: '/cleanup-orphans',
   tags: ['Admin - Media'],
-  summary:
-    'Sweep and delete unreferenced Storage uploads older than the grace window (admin / cron)',
+  summary: 'Admin: Cleanup Orphaned Media',
+  description: 'Sweep and delete unreferenced Storage uploads older than the grace window.',
   security: [{ BearerAuth: [] }],
   request: {
     body: {
@@ -95,16 +138,20 @@ export function createAdminMediaRoutes(
   router.use('*', requireAdmin);
 
   return router
+    .openapi(completeUploadRoute, async (c) => {
+      const data = await mediaService.completeUpload(getRequiredAdmin(c), c.req.valid('param').id);
+      return c.json(ok(data, 'Media upload verified'), 200);
+    })
     .openapi(createUploadUrlRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const body = c.req.valid('json');
       const data = await mediaService.createUploadUrl(actor, body);
-      return c.json({ data }, 201);
+      return c.json(ok(data, 'Presigned upload URL generated successfully'), 201);
     })
     .openapi(cleanupOrphansRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const body = c.req.valid('json') ?? { olderThanHours: 24, limit: 100 };
       const data = await mediaService.cleanupOrphans(actor, body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Orphaned media cleanup completed'), 200);
     });
 }

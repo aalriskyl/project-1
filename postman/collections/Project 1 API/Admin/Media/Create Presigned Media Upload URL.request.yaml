@@ -10,8 +10,8 @@ body:
   content: |-
     {
       "folder": "products",
-      "contentType": "image/png",
-      "contentLengthBytes": 245000
+      "contentType": "{{uploadContentType}}",
+      "contentLengthBytes": {{uploadContentLengthBytes}}
     }
 scripts:
   - type: afterResponse
@@ -23,5 +23,6 @@ scripts:
       if (pm.response.code === 201) {
         const json = pm.response.json();
         pm.environment.set('uploadUrl', json.data.uploadUrl);
-        pm.environment.set('uploadedPublicUrl', json.data.publicUrl);
+        pm.environment.set('uploadId', json.data.uploadId);
+        pm.environment.unset('uploadedPublicUrl');
       }

@@ -7,6 +7,18 @@ queryParams:
   - key: limit
     value: '20'
     description: Page size (1..100)
+  - key: page
+    value: '1'
+    disabled: true
+    description: Optional 1-based page number (returns total & totalPages in meta)
+  - key: q
+    value: admin
+    disabled: true
+    description: Optional fuzzy text search across displayName, email, and phone
+  - key: role
+    value: user
+    disabled: true
+    description: Optional role filter (user or admin)
   - key: cursor
     value: ''
     disabled: true

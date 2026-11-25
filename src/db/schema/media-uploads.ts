@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { index, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 import { users } from '@/db/schema/users.ts';
 
 /**
@@ -14,6 +24,9 @@ export const mediaUploads = pgTable(
     objectPath: text('object_path').notNull(),
     publicUrl: text('public_url').notNull(),
     contentType: varchar('content_type', { length: 64 }).notNull(),
+    expectedBytes: integer('expected_bytes'),
+    verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'date' }),
+    deletingAt: timestamp('deleting_at', { withTimezone: true, mode: 'date' }),
     uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
@@ -29,3 +42,18 @@ export const mediaUploads = pgTable(
 
 export type MediaUploadRow = typeof mediaUploads.$inferSelect;
 export type NewMediaUploadRow = typeof mediaUploads.$inferInsert;
+
+export const mediaReferences = pgTable(
+  'media_references',
+  {
+    uploadId: uuid('upload_id')
+      .notNull()
+      .references(() => mediaUploads.id, { onDelete: 'cascade' }),
+    ownerType: varchar('owner_type', { length: 16 }).notNull(),
+    ownerId: uuid('owner_id').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.uploadId, t.ownerType, t.ownerId] }),
+    index('media_references_owner_idx').on(t.ownerType, t.ownerId),
+  ],
+).enableRLS();

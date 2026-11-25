@@ -9,8 +9,8 @@ body:
   type: json
   content: |-
     {
-      "email": "ada@example.com",
-      "password": "correct-horse-battery-staple"
+      "email": "admin@tsuzumi.test",
+      "password": "TsuzumiAdmin2026!"
     }
 scripts:
   - type: afterResponse
@@ -21,6 +21,7 @@ scripts:
       });
       pm.test('Returns authenticated session tokens', () => {
         const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
         pm.expect(json.data.tokens.accessToken).to.be.a('string');
         pm.expect(json.data.tokens.refreshToken).to.be.a('string');
       });

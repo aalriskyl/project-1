@@ -26,7 +26,47 @@ values:
     type: secret
     description: Presigned Supabase Storage PUT URL populated by Create Presigned Media Upload URL
   - key: uploadedPublicUrl
-    value: 'https://placehold.co/800x600.webp'
+    value: ''
     enabled: true
     type: default
-    description: Public CDN image URL populated automatically when requesting a presigned upload URL
+    description: Verified public image URL populated only by Complete Media Upload
+  - key: categoryId
+    value: ''
+    enabled: true
+    type: default
+    description: Category UUIDv7 auto-populated by Catalog/Admin Category requests
+  - key: productId
+    value: ''
+    enabled: true
+    type: default
+    description: Product UUIDv7 auto-populated by Products/Admin Product requests
+  - key: sparepartProductId
+    value: ''
+    enabled: true
+    type: default
+    description: Sparepart Product UUIDv7 auto-populated by List & Search Products / Spareparts requests
+  - key: articleId
+    value: ''
+    enabled: true
+    type: default
+    description: Article UUIDv7 auto-populated by Admin Article requests
+  - key: reviewId
+    value: ''
+    enabled: true
+    type: default
+    description: Review UUIDv7 auto-populated by Product Review requests
+  - key: uploadId
+    value: ''
+    enabled: true
+    type: default
+    description: Tracked upload UUID from Create Presigned Media Upload URL
+  - key: uploadContentType
+    value: image/png
+    enabled: true
+    type: default
+    description: Actual MIME type of the selected local image
+  - key: uploadContentLengthBytes
+    value: '245000'
+    enabled: true
+    type: default
+    description: Set to the exact byte size of the local image before requesting an upload URL

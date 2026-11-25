@@ -1,3 +1,5 @@
+import { collectMediaStrings } from '@/modules/media/media-attachments.repository.ts';
+import { env } from '@/config/env.ts';
 import type { ArticleRow } from '@/db/schema/articles.ts';
 import type { CategoryRow } from '@/db/schema/categories.ts';
 import type { MediaUploadRow } from '@/db/schema/media-uploads.ts';
@@ -6,6 +8,7 @@ import type { ProductReviewRow } from '@/db/schema/product-reviews.ts';
 import type { ProductRow } from '@/db/schema/products.ts';
 import { extractReferencedObjectPaths } from '@/lib/asset-url.ts';
 import { ConflictError } from '@/lib/errors.ts';
+import { matchesFuzzyInMemory } from '@/lib/search.ts';
 import type {
   ArticlesRepository,
   ArticleSummaryRow,
@@ -87,6 +90,10 @@ function toArticleSummary(row: ArticleRow): ArticleSummaryRow {
     coverImageUrl: row.coverImageUrl,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
+    focusKeyword: row.focusKeyword,
+    canonicalUrl: row.canonicalUrl,
+    noIndex: row.noIndex,
+    ogImageUrl: row.ogImageUrl,
     tags: [...row.tags],
     isPublished: row.isPublished,
     publishedAt: row.publishedAt,
@@ -130,6 +137,25 @@ export function createInMemoryDatastore(): InMemoryDatastore {
   const reviewsById = new Map<string, ProductReviewRow>();
   const articlesById = new Map<string, ArticleRow>();
   const mediaUploadsById = new Map<string, MediaUploadRow>();
+
+  const assertMediaAttachments = (row: unknown): void => {
+    if (env.SUPABASE_URL === undefined) return;
+    for (const path of extractReferencedObjectPaths(collectMediaStrings(row))) {
+      const upload = [...mediaUploadsById.values()].find(
+        (u) => u.objectPath === path && u.bucket === env.SUPABASE_STORAGE_BUCKET,
+      );
+      if (
+        !upload ||
+        upload.verifiedAt === null ||
+        upload.deletedAt !== null ||
+        upload.deletingAt !== null
+      )
+        throw new ConflictError(
+          'Complete and verify each media upload before attaching it',
+          'MEDIA_NOT_VERIFIED',
+        );
+    }
+  };
 
   const findStoredByEmail = (email: string): StoredUser | null => {
     const normalized = email.trim().toLowerCase();
@@ -216,6 +242,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       if (existing === undefined) {
         return Promise.reject(new Error('User not found'));
       }
+      if (existing.googleSub !== null && existing.googleSub !== googleSub)
+        return Promise.reject(
+          new ConflictError('Account is already linked', 'GOOGLE_SUB_MISMATCH'),
+        );
       for (const other of usersById.values()) {
         if (other.id !== userId && other.googleSub === googleSub) {
           return Promise.reject(
@@ -362,14 +392,25 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(toPublicEntity(updated));
     },
 
-    listCursor({ limit, cursor }): Promise<readonly UserEntity[]> {
-      const sorted = [...usersById.values()].sort((a, b) => {
-        const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
-        if (timeDiff !== 0) {
-          return timeDiff;
-        }
-        return b.id.localeCompare(a.id);
-      });
+    listCursor({ limit, cursor, query, role }): Promise<readonly UserEntity[]> {
+      const sorted = [...usersById.values()]
+        .filter((item) => {
+          if (role !== undefined && item.role !== role) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([item.displayName, item.email, item.phone], query)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return b.id.localeCompare(a.id);
+        });
 
       const filtered =
         cursor !== undefined
@@ -382,6 +423,29 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
       return Promise.resolve(filtered.slice(0, limit).map(toPublicEntity));
     },
+
+    listOffset({ limit, offset, query, role }) {
+      const sorted = [...usersById.values()]
+        .filter((item) => {
+          if (role !== undefined && item.role !== role) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([item.displayName, item.email, item.phone], query)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
+          return timeDiff !== 0 ? timeDiff : b.id.localeCompare(a.id);
+        });
+
+      return Promise.resolve({
+        items: sorted.slice(offset, offset + limit).map(toPublicEntity),
+        total: sorted.length,
+      });
+    },
   };
 
   const sortCategories = (rows: CategoryRow[]): CategoryRow[] =>
@@ -391,16 +455,70 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     );
 
   const catalogRepo: CatalogRepository = {
-    listActive(): Promise<readonly CategoryRow[]> {
-      const active = [...categoriesById.values()].filter(
-        (row) => row.deletedAt === null && row.isActive,
-      );
+    listActive(filter): Promise<readonly CategoryRow[]> {
+      const active = [...categoriesById.values()].filter((row) => {
+        if (row.deletedAt !== null || !row.isActive) return false;
+        if (
+          filter?.query !== undefined &&
+          !matchesFuzzyInMemory([row.name, row.slug, row.description], filter.query)
+        ) {
+          return false;
+        }
+        return true;
+      });
       return Promise.resolve(sortCategories(active));
     },
 
-    listAllNonDeleted(): Promise<readonly CategoryRow[]> {
-      const rows = [...categoriesById.values()].filter((row) => row.deletedAt === null);
-      return Promise.resolve(sortCategories(rows));
+    listAdminCursor({ limit, cursor, query }): Promise<readonly CategoryRow[]> {
+      const sorted = [...categoriesById.values()]
+        .filter((row) => {
+          if (row.deletedAt !== null) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([row.name, row.slug, row.description], query)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const diff = b.createdAt.getTime() - a.createdAt.getTime();
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+
+      const filtered =
+        cursor !== undefined
+          ? sorted.filter((r) => {
+              const rMs = r.createdAt.getTime();
+              const cMs = cursor.createdAt.getTime();
+              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
+            })
+          : sorted;
+
+      return Promise.resolve(filtered.slice(0, limit));
+    },
+
+    listAdminOffset({ limit, offset, query }) {
+      const sorted = [...categoriesById.values()]
+        .filter((row) => {
+          if (row.deletedAt !== null) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([row.name, row.slug, row.description], query)
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const diff = b.createdAt.getTime() - a.createdAt.getTime();
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+
+      return Promise.resolve({
+        items: sorted.slice(offset, offset + limit),
+        total: sorted.length,
+      });
     },
 
     findById(id: string): Promise<CategoryRow | null> {
@@ -459,6 +577,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         description: input.description,
         metaTitle: input.metaTitle,
         metaDescription: input.metaDescription,
+        focusKeyword: input.focusKeyword,
+        canonicalUrl: input.canonicalUrl,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl,
         imageUrl: input.imageUrl,
         bannerImageUrl: input.bannerImageUrl,
         specSchema: [...input.specSchema],
@@ -468,6 +590,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         updatedAt: now,
         deletedAt: null,
       };
+      assertMediaAttachments(created);
       categoriesById.set(created.id, created);
       return Promise.resolve(created);
     },
@@ -494,6 +617,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.description !== undefined ? { description: patch.description } : {}),
         ...(patch.metaTitle !== undefined ? { metaTitle: patch.metaTitle } : {}),
         ...(patch.metaDescription !== undefined ? { metaDescription: patch.metaDescription } : {}),
+        ...(patch.focusKeyword !== undefined ? { focusKeyword: patch.focusKeyword } : {}),
+        ...(patch.canonicalUrl !== undefined ? { canonicalUrl: patch.canonicalUrl } : {}),
+        ...(patch.noIndex !== undefined ? { noIndex: patch.noIndex } : {}),
+        ...(patch.ogImageUrl !== undefined ? { ogImageUrl: patch.ogImageUrl } : {}),
         ...(patch.imageUrl !== undefined ? { imageUrl: patch.imageUrl } : {}),
         ...(patch.bannerImageUrl !== undefined ? { bannerImageUrl: patch.bannerImageUrl } : {}),
         ...(patch.specSchema !== undefined ? { specSchema: [...patch.specSchema] } : {}),
@@ -501,6 +628,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
         updatedAt: new Date(),
       };
+      assertMediaAttachments(updated);
       categoriesById.set(id, updated);
       return Promise.resolve(updated);
     },
@@ -516,13 +644,13 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     listSitemapIndex() {
       const cats = [...categoriesById.values()]
-        .filter((r) => r.deletedAt === null && r.isActive)
+        .filter((r) => r.deletedAt === null && r.isActive && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       const prods = [...productsById.values()]
-        .filter((r) => r.deletedAt === null && r.isActive)
+        .filter((r) => r.deletedAt === null && r.isActive && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       const arts = [...articlesById.values()]
-        .filter((r) => r.deletedAt === null && r.isPublished)
+        .filter((r) => r.deletedAt === null && r.isPublished && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       return Promise.resolve({ categories: cats, products: prods, articles: arts });
     },
@@ -536,14 +664,6 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
   const productsRepo: ProductsRepository = {
     listPublicCursor(filter): Promise<readonly ProductCardRow[]> {
-      const terms =
-        filter.query !== undefined
-          ? filter.query
-              .toLowerCase()
-              .split(/\s+/)
-              .filter((t) => t.length > 0)
-          : [];
-
       const matching = [...productsById.values()].filter((row) => {
         if (row.deletedAt !== null || !row.isActive) return false;
         if (filter.categoryIds !== undefined && !filter.categoryIds.includes(row.categoryId)) {
@@ -559,11 +679,11 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         }
         if (filter.minPrice !== undefined && row.priceIdr < filter.minPrice) return false;
         if (filter.maxPrice !== undefined && row.priceIdr > filter.maxPrice) return false;
-        if (terms.length > 0) {
-          const haystack = [row.name, row.sku ?? '', row.brandSlug ?? '', row.descriptionMd ?? '']
-            .join(' ')
-            .toLowerCase();
-          if (!terms.every((t) => haystack.includes(t))) return false;
+        if (
+          filter.query !== undefined &&
+          !matchesFuzzyInMemory([row.name, row.sku, row.brandSlug, row.descriptionMd], filter.query)
+        ) {
+          return false;
         }
         return true;
       });
@@ -582,9 +702,18 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(afterCursor.slice(0, filter.limit).map(toProductCardRow));
     },
 
-    listAdminCursor({ limit, cursor }): Promise<readonly ProductCardRow[]> {
+    listAdminCursor({ limit, cursor, query }): Promise<readonly ProductCardRow[]> {
       const sorted = sortProductsDesc(
-        [...productsById.values()].filter((r) => r.deletedAt === null),
+        [...productsById.values()].filter((r) => {
+          if (r.deletedAt !== null) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([r.name, r.sku, r.brandSlug, r.descriptionMd], query)
+          ) {
+            return false;
+          }
+          return true;
+        }),
       );
       const filtered =
         cursor !== undefined
@@ -595,6 +724,25 @@ export function createInMemoryDatastore(): InMemoryDatastore {
             })
           : sorted;
       return Promise.resolve(filtered.slice(0, limit).map(toProductCardRow));
+    },
+
+    listAdminOffset({ limit, offset, query }) {
+      const sorted = sortProductsDesc(
+        [...productsById.values()].filter((r) => {
+          if (r.deletedAt !== null) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([r.name, r.sku, r.brandSlug, r.descriptionMd], query)
+          ) {
+            return false;
+          }
+          return true;
+        }),
+      );
+      return Promise.resolve({
+        items: sorted.slice(offset, offset + limit).map(toProductCardRow),
+        total: sorted.length,
+      });
     },
 
     findActiveBySlug(slug): Promise<ProductRow | null> {
@@ -712,6 +860,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         descriptionMd: input.descriptionMd,
         metaTitle: input.metaTitle,
         metaDescription: input.metaDescription,
+        focusKeyword: input.focusKeyword,
+        canonicalUrl: input.canonicalUrl,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl,
         priceIdr: input.priceIdr,
         requiresQuote: input.requiresQuote,
         stock: input.stock,
@@ -731,6 +883,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         updatedAt: now,
         deletedAt: null,
       };
+      assertMediaAttachments(created);
       productsById.set(created.id, created);
       return Promise.resolve(created);
     },
@@ -764,6 +917,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.descriptionMd !== undefined ? { descriptionMd: patch.descriptionMd } : {}),
         ...(patch.metaTitle !== undefined ? { metaTitle: patch.metaTitle } : {}),
         ...(patch.metaDescription !== undefined ? { metaDescription: patch.metaDescription } : {}),
+        ...(patch.focusKeyword !== undefined ? { focusKeyword: patch.focusKeyword } : {}),
+        ...(patch.canonicalUrl !== undefined ? { canonicalUrl: patch.canonicalUrl } : {}),
+        ...(patch.noIndex !== undefined ? { noIndex: patch.noIndex } : {}),
+        ...(patch.ogImageUrl !== undefined ? { ogImageUrl: patch.ogImageUrl } : {}),
         ...(patch.priceIdr !== undefined ? { priceIdr: patch.priceIdr } : {}),
         ...(patch.requiresQuote !== undefined ? { requiresQuote: patch.requiresQuote } : {}),
         ...(patch.stock !== undefined ? { stock: patch.stock } : {}),
@@ -778,6 +935,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.weightKg !== undefined ? { weightKg: patch.weightKg } : {}),
         updatedAt: new Date(),
       };
+      assertMediaAttachments(updated);
       productsById.set(id, updated);
       return Promise.resolve(updated);
     },
@@ -824,6 +982,50 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           : published;
 
       return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
+    },
+
+    listAdminCursor({ limit, cursor, productId, isPublished, rating }) {
+      const matched = [...reviewsById.values()]
+        .filter((r) => {
+          if (productId !== undefined && r.productId !== productId) return false;
+          if (isPublished !== undefined && r.isPublished !== isPublished) return false;
+          if (rating !== undefined && r.rating !== rating) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const diff = b.createdAt.getTime() - a.createdAt.getTime();
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+
+      const filtered =
+        cursor !== undefined
+          ? matched.filter((r) => {
+              const rMs = r.createdAt.getTime();
+              const cMs = cursor.createdAt.getTime();
+              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
+            })
+          : matched;
+
+      return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
+    },
+
+    listAdminOffset({ limit, offset, productId, isPublished, rating }) {
+      const matched = [...reviewsById.values()]
+        .filter((r) => {
+          if (productId !== undefined && r.productId !== productId) return false;
+          if (isPublished !== undefined && r.isPublished !== isPublished) return false;
+          if (rating !== undefined && r.rating !== rating) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const diff = b.createdAt.getTime() - a.createdAt.getTime();
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+
+      return Promise.resolve({
+        items: matched.slice(offset, offset + limit).map(toReviewWithAuthor),
+        total: matched.length,
+      });
     },
 
     createAndSyncProductRating(input) {
@@ -881,11 +1083,14 @@ export function createInMemoryDatastore(): InMemoryDatastore {
   };
 
   const articlesRepo: ArticlesRepository = {
-    listPublishedCursor({ limit, cursor, tag }): Promise<readonly ArticleSummaryRow[]> {
+    listPublishedCursor({ limit, cursor, tag, query }): Promise<readonly ArticleSummaryRow[]> {
       const published = [...articlesById.values()]
         .filter((r) => {
           if (r.deletedAt !== null || !r.isPublished) return false;
           if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
+            return false;
+          }
           return true;
         })
         .sort((a, b) => {
@@ -907,9 +1112,16 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(filtered.slice(0, limit).map(toArticleSummary));
     },
 
-    listAdminCursor({ limit, cursor }): Promise<readonly ArticleSummaryRow[]> {
+    listAdminCursor({ limit, cursor, tag, query }): Promise<readonly ArticleSummaryRow[]> {
       const rows = [...articlesById.values()]
-        .filter((r) => r.deletedAt === null)
+        .filter((r) => {
+          if (r.deletedAt !== null) return false;
+          if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
+            return false;
+          }
+          return true;
+        })
         .sort((a, b) => {
           const diff = b.createdAt.getTime() - a.createdAt.getTime();
           return diff !== 0 ? diff : b.id.localeCompare(a.id);
@@ -925,6 +1137,27 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           : rows;
 
       return Promise.resolve(filtered.slice(0, limit).map(toArticleSummary));
+    },
+
+    listAdminOffset({ limit, offset, tag, query }) {
+      const rows = [...articlesById.values()]
+        .filter((r) => {
+          if (r.deletedAt !== null) return false;
+          if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
+            return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const diff = b.createdAt.getTime() - a.createdAt.getTime();
+          return diff !== 0 ? diff : b.id.localeCompare(a.id);
+        });
+
+      return Promise.resolve({
+        items: rows.slice(offset, offset + limit).map(toArticleSummary),
+        total: rows.length,
+      });
     },
 
     findPublishedBySlug(slug): Promise<ArticleRow | null> {
@@ -969,6 +1202,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         coverImageUrl: input.coverImageUrl,
         metaTitle: input.metaTitle,
         metaDescription: input.metaDescription,
+        focusKeyword: input.focusKeyword,
+        canonicalUrl: input.canonicalUrl,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl,
         tags: [...input.tags],
         relatedProductIds: [...input.relatedProductIds],
         isPublished: input.isPublished,
@@ -977,6 +1214,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         updatedAt: now,
         deletedAt: null,
       };
+      assertMediaAttachments(created);
       articlesById.set(created.id, created);
       return Promise.resolve(created);
     },
@@ -1004,6 +1242,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.coverImageUrl !== undefined ? { coverImageUrl: patch.coverImageUrl } : {}),
         ...(patch.metaTitle !== undefined ? { metaTitle: patch.metaTitle } : {}),
         ...(patch.metaDescription !== undefined ? { metaDescription: patch.metaDescription } : {}),
+        ...(patch.focusKeyword !== undefined ? { focusKeyword: patch.focusKeyword } : {}),
+        ...(patch.canonicalUrl !== undefined ? { canonicalUrl: patch.canonicalUrl } : {}),
+        ...(patch.noIndex !== undefined ? { noIndex: patch.noIndex } : {}),
+        ...(patch.ogImageUrl !== undefined ? { ogImageUrl: patch.ogImageUrl } : {}),
         ...(patch.tags !== undefined ? { tags: [...patch.tags] } : {}),
         ...(patch.relatedProductIds !== undefined
           ? { relatedProductIds: [...patch.relatedProductIds] }
@@ -1012,6 +1254,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.publishedAt !== undefined ? { publishedAt: patch.publishedAt } : {}),
         updatedAt: new Date(),
       };
+      assertMediaAttachments(updated);
       articlesById.set(id, updated);
       return Promise.resolve(updated);
     },
@@ -1035,6 +1278,9 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         publicUrl: input.publicUrl,
         contentType: input.contentType,
         uploadedBy: input.uploadedBy,
+        expectedBytes: input.expectedBytes,
+        verifiedAt: null,
+        deletingAt: null,
         createdAt: new Date(),
         deletedAt: null,
       };
@@ -1042,31 +1288,35 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(created);
     },
 
-    listSweepCandidates({ olderThan, limit }): Promise<readonly MediaUploadRow[]> {
-      const rows = [...mediaUploadsById.values()]
-        .filter((r) => r.deletedAt === null && r.createdAt.getTime() <= olderThan.getTime())
-        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-      return Promise.resolve(rows.slice(0, limit));
+    findById(id) {
+      return Promise.resolve(mediaUploadsById.get(id) ?? null);
     },
-
-    collectAllReferencedObjectPaths(bucket): Promise<ReadonlySet<string>> {
-      const rawSources: (string | null | undefined)[] = [];
-      for (const c of categoriesById.values()) {
-        if (c.deletedAt !== null) continue;
-        rawSources.push(c.imageUrl, c.bannerImageUrl, c.description);
+    markVerified(id, verifiedAt) {
+      const row = mediaUploadsById.get(id);
+      if (!row || row.deletedAt !== null || row.deletingAt !== null) return Promise.resolve(null);
+      const updated = { ...row, verifiedAt };
+      mediaUploadsById.set(id, updated);
+      return Promise.resolve(updated);
+    },
+    claimOrphans({ olderThan, limit }) {
+      const referenced = new Set<string>();
+      for (const row of [
+        ...categoriesById.values(),
+        ...productsById.values(),
+        ...articlesById.values(),
+      ]) {
+        if (row.deletedAt !== null) continue;
+        for (const path of extractReferencedObjectPaths(collectMediaStrings(row)))
+          referenced.add(path);
       }
-      for (const p of productsById.values()) {
-        if (p.deletedAt !== null) continue;
-        rawSources.push(p.primaryImageUrl, p.descriptionMd);
-        for (const m of p.media) {
-          rawSources.push(m.url);
-        }
-      }
-      for (const a of articlesById.values()) {
-        if (a.deletedAt !== null) continue;
-        rawSources.push(a.coverImageUrl, a.contentMd);
-      }
-      return Promise.resolve(extractReferencedObjectPaths(rawSources, bucket));
+      const rows = [...mediaUploadsById.values()]
+        .filter(
+          (r) => r.deletedAt === null && r.createdAt <= olderThan && !referenced.has(r.objectPath),
+        )
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+        .slice(0, limit);
+      for (const row of rows) mediaUploadsById.set(row.id, { ...row, deletingAt: new Date() });
+      return Promise.resolve(rows);
     },
 
     markDeletedByIds(ids, deletedAt): Promise<void> {
@@ -1107,6 +1357,9 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     seedMediaUpload(params): MediaUploadRow {
       const row: MediaUploadRow = {
         ...params,
+        expectedBytes: null,
+        verifiedAt: new Date(),
+        deletingAt: null,
         deletedAt: null,
       };
       mediaUploadsById.set(row.id, row);

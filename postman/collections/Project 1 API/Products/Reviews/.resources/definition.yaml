@@ -1,0 +1,4 @@
+$kind: collection
+name: Reviews
+description: Public product reviews feed and authenticated review submission.
+order: 6000

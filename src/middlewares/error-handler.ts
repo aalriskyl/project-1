@@ -20,7 +20,7 @@ function mapHttpException(err: HTTPException): {
       return { statusCode: 404, code: 'RESOURCE_NOT_FOUND', message: 'Resource not found' };
     case 413:
       return {
-        statusCode: 400,
+        statusCode: 413,
         code: 'PAYLOAD_TOO_LARGE',
         message: 'Request body exceeds maximum allowed size',
       };
@@ -47,12 +47,11 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
 
     return c.json(
       {
-        error: {
-          code: err.code,
-          message: err.message,
-          requestId,
-          ...(err.details !== undefined ? { details: [...err.details] } : {}),
-        },
+        success: false as const,
+        message: err.message,
+        errorCode: err.code,
+        requestId,
+        ...(err.details !== undefined ? { details: [...err.details] } : {}),
       },
       err.statusCode,
     );
@@ -65,11 +64,10 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
     }
     return c.json(
       {
-        error: {
-          code: mapped.code,
-          message: mapped.message,
-          requestId,
-        },
+        success: false as const,
+        message: mapped.message,
+        errorCode: mapped.code,
+        requestId,
       },
       mapped.statusCode,
     );
@@ -80,11 +78,10 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
 
   return c.json(
     {
-      error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'An unexpected error occurred',
-        requestId,
-      },
+      success: false as const,
+      message: 'An unexpected error occurred',
+      errorCode: 'INTERNAL_SERVER_ERROR',
+      requestId,
     },
     500,
   );
@@ -94,11 +91,10 @@ export const notFoundHandler: NotFoundHandler<AppEnv> = (c) => {
   const requestId = c.get('requestId');
   return c.json(
     {
-      error: {
-        code: 'ROUTE_NOT_FOUND',
-        message: 'The requested endpoint does not exist',
-        requestId,
-      },
+      success: false as const,
+      message: 'The requested endpoint does not exist',
+      errorCode: 'ROUTE_NOT_FOUND',
+      requestId,
     },
     404,
   );

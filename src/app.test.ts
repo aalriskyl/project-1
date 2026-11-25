@@ -64,7 +64,8 @@ describe('Application core invariants', () => {
     const notFoundRes = await testApp.request('/v1/does-not-exist');
     expect(notFoundRes.status).toBe(404);
     const notFoundBody = ErrorResponseSchema.parse(await notFoundRes.json());
-    expect(notFoundBody.error.code).toBe('ROUTE_NOT_FOUND');
+    expect(notFoundBody.success).toBe(false);
+    expect(notFoundBody.errorCode).toBe('ROUTE_NOT_FOUND');
   });
 
   test('enforces CORS allowlist, body size limit, and hides internal SQL/stack errors on 500', async () => {
@@ -112,6 +113,18 @@ describe('Application core invariants', () => {
     expect(() => parseEnv({ ...validBase, CORS_ORIGINS: '*' })).toThrow();
     expect(() => parseEnv({ ...validBase, JWT_ACCESS_SECRET: 'too-short' })).toThrow();
     expect(() => parseEnv({ ...validBase, DATABASE_URL: 'mysql://localhost/db' })).toThrow();
+    expect(() => parseEnv({ ...validBase, NODE_ENV: 'production' })).toThrow();
+    const production = {
+      ...validBase,
+      NODE_ENV: 'production',
+      REDIS_URL: 'redis://localhost:6379',
+      RESEND_API_KEY: 'test-resend-key',
+      MAIL_OUTBOX_ENCRYPTION_KEY: 'a'.repeat(64),
+      APP_PUBLIC_URL: 'https://example.com',
+    };
+    expect(() => parseEnv(production)).not.toThrow();
+    expect(() => parseEnv({ ...production, APP_PUBLIC_URL: 'http://example.com' })).toThrow();
+    expect(() => parseEnv({ ...production, TRUSTED_PROXY_IPS: 'trusted.example.com' })).toThrow();
   });
 });
 

@@ -1,7 +1,7 @@
 $kind: http-request
 method: POST
 url: '{{baseUrl}}/v1/admin/categories'
-order: 1000
+order: 1694
 headers:
   - key: Content-Type
     value: application/json
@@ -12,6 +12,10 @@ body:
       "name": "Genset Silent",
       "description": "Industrial silent diesel generator sets 10-500 kVA.",
       "metaTitle": "Jual Genset Silent 10-500 kVA | Tsuzumi Japan",
+      "metaDescription": "Distributor resmi genset silent diesel Tsuzumi Japan 10-500 kVA bergaransi.",
+      "focusKeyword": "genset silent",
+      "noIndex": false,
+      "ogImageUrl": "{{uploadedPublicUrl}}",
       "specSchema": [
         {
           "key": "rated_power_kva",
@@ -31,3 +35,17 @@ body:
       "sortOrder": 10,
       "isActive": true
     }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('categoryId', json.data.id);
+        }
+      }

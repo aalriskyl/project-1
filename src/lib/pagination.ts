@@ -32,6 +32,36 @@ export const CursorPaginationQuerySchema = z.object({
 
 export type CursorPaginationQuery = z.infer<typeof CursorPaginationQuerySchema>;
 
+export const MAX_OFFSET_PAGE = 10_000;
+
+export const AdminPaginationQuerySchema = CursorPaginationQuerySchema.extend({
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_OFFSET_PAGE)
+    .optional()
+    .openapi({
+      param: { name: 'page', in: 'query' },
+      description:
+        'Optional 1-based page number for numbered admin tables (mutually exclusive with cursor; returns total & totalPages in meta)',
+      example: 1,
+    }),
+});
+
+export type AdminPaginationQuery = z.infer<typeof AdminPaginationQuerySchema>;
+
+export function assertCursorOrPage(query: {
+  readonly cursor?: string | undefined;
+  readonly page?: number | undefined;
+}): void {
+  if (query.cursor !== undefined && query.page !== undefined) {
+    throw new ValidationError('Provide either cursor or page, not both', [
+      { field: 'page', message: 'Cannot combine cursor and page pagination in the same request' },
+    ]);
+  }
+}
+
 const CursorPayloadSchema = z.object({
   createdAt: z.iso.datetime(),
   id: z.uuid(),
@@ -74,23 +104,53 @@ export function decodeCursor(rawCursor: string): DecodedCursor {
   };
 }
 
+export interface CursorPageMeta {
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+  readonly limit: number;
+  readonly page?: number;
+  readonly total?: number;
+  readonly totalPages?: number;
+}
+
 export interface CursorPage<T> {
   readonly data: readonly T[];
-  readonly meta: {
-    readonly nextCursor: string | null;
-    readonly hasMore: boolean;
-    readonly limit: number;
+  readonly meta: CursorPageMeta;
+}
+
+export function buildOffsetPage<T>(
+  items: readonly T[],
+  total: number,
+  page: number,
+  limit: number,
+): CursorPage<T> {
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+  return {
+    data: items,
+    meta: {
+      nextCursor: null,
+      hasMore: page < totalPages,
+      limit,
+      page,
+      total,
+      totalPages,
+    },
   };
 }
 
 export function createCursorPageSchema<T extends z.ZodType>(itemSchema: T, schemaName: string) {
   return z
     .object({
+      success: z.literal(true),
+      message: z.string(),
       data: z.array(itemSchema),
       meta: z.object({
         nextCursor: z.string().nullable(),
         hasMore: z.boolean(),
         limit: z.number().int().min(1).max(MAX_PAGE_SIZE),
+        page: z.number().int().min(1).optional(),
+        total: z.number().int().nonnegative().optional(),
+        totalPages: z.number().int().nonnegative().optional(),
       }),
     })
     .openapi(schemaName);

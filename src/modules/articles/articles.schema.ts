@@ -1,6 +1,12 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
-import { createCursorPageSchema, QueryBooleanSchema } from '@/lib/pagination.ts';
+import { AssetImageUrlSchema, CanonicalUrlSchema } from '@/lib/asset-url.ts';
+import {
+  AdminPaginationQuerySchema,
+  createCursorPageSchema,
+  QueryBooleanSchema,
+} from '@/lib/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
+import { SearchQueryParamSchema } from '@/lib/search.ts';
 
 const ArticleSlugSchema = z
   .string()
@@ -44,6 +50,10 @@ export const ArticleSummarySchema = z
     coverImageUrl: z.string().nullable(),
     metaTitle: z.string().nullable(),
     metaDescription: z.string().nullable(),
+    focusKeyword: z.string().nullable().openapi({ example: 'genset silent 30 kva' }),
+    canonicalUrl: z.string().nullable(),
+    noIndex: z.boolean(),
+    ogImageUrl: z.string().nullable(),
     tags: z.array(z.string()),
     isPublished: z.boolean(),
     publishedAt: z.iso.datetime().nullable(),
@@ -81,9 +91,21 @@ export const ListArticlesQuerySchema = z.object({
     description: 'Filter published articles containing this tag',
     example: 'genset',
   }),
+  q: SearchQueryParamSchema,
 });
 
 export type ListArticlesQuery = z.infer<typeof ListArticlesQuerySchema>;
+
+export const ListAdminArticlesQuerySchema = AdminPaginationQuerySchema.extend({
+  tag: TagStringSchema.optional().openapi({
+    param: { name: 'tag', in: 'query' },
+    description: 'Filter articles containing this tag',
+    example: 'genset',
+  }),
+  q: SearchQueryParamSchema,
+});
+
+export type ListAdminArticlesQuery = z.infer<typeof ListAdminArticlesQuerySchema>;
 
 export const GetArticleQuerySchema = z.object({
   includeRelated: QueryBooleanSchema.optional().openapi({
@@ -127,6 +149,10 @@ export const CreateArticleBodySchema = z
     coverImageUrl: AssetImageUrlSchema.nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().default(false),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     tags: UniqueTagsArraySchema.default([]),
     relatedProductIds: UniqueUuidArraySchema.default([]),
     isPublished: z.boolean().default(false),
@@ -144,6 +170,10 @@ export const UpdateArticleBodySchema = z
     coverImageUrl: AssetImageUrlSchema.nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().optional(),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     tags: UniqueTagsArraySchema.optional(),
     relatedProductIds: UniqueUuidArraySchema.optional(),
     isPublished: z.boolean().optional(),
@@ -157,6 +187,7 @@ export const ArticleCursorPageSchema = createCursorPageSchema(
   'ArticleCursorPage',
 );
 
-export const ArticleDetailEnvelopeSchema = z
-  .object({ data: ArticleDetailSchema })
-  .openapi('ArticleDetailEnvelope');
+export const ArticleDetailEnvelopeSchema = createSuccessEnvelopeSchema(
+  ArticleDetailSchema,
+  'ArticleDetailEnvelope',
+);

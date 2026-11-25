@@ -1,0 +1,1 @@
+CREATE INDEX "users_search_trgm_gin_idx" ON "users" USING gin (("display_name" || ' ' || "email" || ' ' || coalesce("phone", '')) extensions.gin_trgm_ops);

@@ -1,0 +1,29 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/auth/google/link'
+order: 2550
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{accessToken}}'
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "idToken": "replace-with-google-id-token-for-the-same-email"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Google linked to the authenticated account', () => {
+        pm.response.to.have.status(200);
+        const data = pm.response.json().data;
+        pm.environment.set('accessToken', data.tokens.accessToken);
+        pm.environment.set('refreshToken', data.tokens.refreshToken);
+        pm.environment.set('userId', data.user.id);
+      });

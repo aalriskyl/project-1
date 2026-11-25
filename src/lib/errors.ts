@@ -1,7 +1,7 @@
 import { type Hook, z } from '@hono/zod-openapi';
 import type { AppEnv } from '@/types/app.ts';
 
-export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 503;
+export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 503;
 
 export interface ValidationIssueDetail {
   readonly field: string;
@@ -98,12 +98,11 @@ export const ValidationIssueSchema = z
 
 export const ErrorResponseSchema = z
   .object({
-    error: z.object({
-      code: z.string().openapi({ example: 'VALIDATION_ERROR' }),
-      message: z.string().openapi({ example: 'Request validation failed' }),
-      requestId: z.string().optional().openapi({ example: '01936c8e-7f2a-7000-8000-000000000001' }),
-      details: z.array(ValidationIssueSchema).optional(),
-    }),
+    success: z.literal(false),
+    message: z.string().openapi({ example: 'Request validation failed' }),
+    errorCode: z.string().openapi({ example: 'VALIDATION_ERROR' }),
+    requestId: z.string().optional().openapi({ example: '01936c8e-7f2a-7000-8000-000000000001' }),
+    details: z.array(ValidationIssueSchema).optional(),
   })
   .openapi('ErrorResponse');
 
@@ -121,12 +120,11 @@ export const defaultOpenApiHook: Hook<unknown, AppEnv, string, Response | undefi
 
     return c.json(
       {
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Request validation failed',
-          requestId: c.get('requestId'),
-          details,
-        },
+        success: false as const,
+        message: 'Request validation failed',
+        errorCode: 'VALIDATION_ERROR',
+        requestId: c.get('requestId'),
+        details,
       },
       422,
     );

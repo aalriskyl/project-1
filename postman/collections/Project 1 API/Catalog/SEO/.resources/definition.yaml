@@ -1,0 +1,4 @@
+$kind: collection
+name: SEO
+description: Lightweight SEO sitemap feed for Next.js app/sitemap.ts.
+order: 3000

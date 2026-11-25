@@ -1,7 +1,8 @@
-import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
+import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
 import { CursorPaginationQuerySchema } from '@/lib/pagination.ts';
+import { ok, okPage } from '@/lib/response.ts';
 import { requireAuth } from '@/middlewares/auth.ts';
 import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
 import { publicCache } from '@/middlewares/cache-control.ts';
@@ -10,13 +11,14 @@ import {
   CompareProductsQuerySchema,
   CreateProductBodySchema,
   GetProductDetailQuerySchema,
+  ListAdminProductsQuerySchema,
   ListProductsQuerySchema,
   ProductCardListEnvelopeSchema,
   ProductCursorPageSchema,
   ProductDetailEnvelopeSchema,
   ProductIdParamSchema,
   ProductSlugParamSchema,
-  ProductSparepartLinkItemSchema,
+  ProductSparepartsListEnvelopeSchema,
   RecommendationsQuerySchema,
   ReplaceSparepartsBodySchema,
   SparepartCursorPageSchema,
@@ -29,7 +31,9 @@ const listProductsRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Products'],
-  summary: 'List and search active products (zero-join cards + FTS/trigram SKU search)',
+  summary: 'List Products',
+  description:
+    'List and search active products with cursor pagination, category/brand/price filters, and `?q=` fuzzy search.',
   request: {
     query: ListProductsQuerySchema,
   },
@@ -49,7 +53,9 @@ const compareProductsRoute = createRoute({
   method: 'get',
   path: '/compare',
   tags: ['Products'],
-  summary: 'Compare 2 to 4 products in a single batched query with aligned specSchema rows',
+  summary: 'Compare Products',
+  description:
+    'Compare 2 to 4 active products in a single batched query with aligned `specSchema` rows.',
   request: {
     query: CompareProductsQuerySchema,
   },
@@ -73,7 +79,9 @@ const recommendationsRoute = createRoute({
   method: 'get',
   path: '/recommendations',
   tags: ['Products'],
-  summary: 'List recommended/featured products without slow ORDER BY RANDOM() scans',
+  summary: 'Get Product Recommendations',
+  description:
+    'List recommended and featured products without expensive `ORDER BY RANDOM()` scans.',
   request: {
     query: RecommendationsQuerySchema,
   },
@@ -93,7 +101,8 @@ const listSparepartsRoute = createRoute({
   method: 'get',
   path: '/{id}/spareparts',
   tags: ['Products'],
-  summary: 'List compatible spare parts for an equipment product',
+  summary: 'List Product Spare Parts',
+  description: 'List compatible spare parts for an equipment product with cursor pagination.',
   request: {
     params: ProductIdParamSchema,
     query: CursorPaginationQuerySchema,
@@ -118,8 +127,9 @@ const getProductBySlugRoute = createRoute({
   method: 'get',
   path: '/{slug}',
   tags: ['Products'],
-  summary:
-    'Get full product detail by slug (media, specs, dimensions, optional spareparts & related)',
+  summary: 'Get Product by Slug',
+  description:
+    'Fetch full product detail by slug (media, specs, dimensions, SEO metadata, optional `spareparts` & `related`).',
   request: {
     params: ProductSlugParamSchema,
     query: GetProductDetailQuerySchema,
@@ -144,14 +154,16 @@ const listAdminProductsRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Admin - Products'],
-  summary: 'List all non-deleted products including inactive ones (admin)',
+  summary: 'Admin: List Products',
+  description:
+    'List all non-deleted products (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.',
   security: [{ BearerAuth: [] }],
   request: {
-    query: CursorPaginationQuerySchema,
+    query: ListAdminProductsQuerySchema,
   },
   responses: {
     200: {
-      description: 'Cursor-paginated admin products',
+      description: 'Paginated admin products',
       content: { 'application/json': { schema: ProductCursorPageSchema } },
     },
     401: {
@@ -162,6 +174,10 @@ const listAdminProductsRoute = createRoute({
       description: 'Admin privileges required',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    422: {
+      description: 'Invalid pagination or query parameters',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
   },
 });
 
@@ -169,7 +185,8 @@ const getAdminProductRoute = createRoute({
   method: 'get',
   path: '/{id}',
   tags: ['Admin - Products'],
-  summary: 'Get any product by ID including inactive products (admin)',
+  summary: 'Admin: Get Product by ID',
+  description: 'Fetch any product (active or inactive) by ID.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ProductIdParamSchema,
@@ -198,7 +215,9 @@ const createProductRoute = createRoute({
   method: 'post',
   path: '/',
   tags: ['Admin - Products'],
-  summary: 'Create a product with dynamic spec validation against its category schema (admin)',
+  summary: 'Admin: Create Product',
+  description:
+    'Create a product with dynamic `specs` validation against its category `effectiveSpecSchema`.',
   security: [{ BearerAuth: [] }],
   request: {
     body: {
@@ -238,7 +257,8 @@ const updateProductRoute = createRoute({
   method: 'patch',
   path: '/{id}',
   tags: ['Admin - Products'],
-  summary: 'Update a product (admin)',
+  summary: 'Admin: Update Product',
+  description: 'Update product pricing, stock, media, specs, or SEO fields.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ProductIdParamSchema,
@@ -279,7 +299,8 @@ const deleteProductRoute = createRoute({
   method: 'delete',
   path: '/{id}',
   tags: ['Admin - Products'],
-  summary: 'Soft-delete a product (admin)',
+  summary: 'Admin: Delete Product',
+  description: 'Soft-delete a product.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ProductIdParamSchema,
@@ -307,7 +328,8 @@ const replaceSparepartsRoute = createRoute({
   method: 'put',
   path: '/{id}/spareparts',
   tags: ['Admin - Products'],
-  summary: 'Atomically replace compatible spare-part links for a product (admin)',
+  summary: 'Admin: Replace Product Spare Parts',
+  description: 'Atomically replace compatible spare-part links for a parent equipment product.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ProductIdParamSchema,
@@ -321,7 +343,7 @@ const replaceSparepartsRoute = createRoute({
       description: 'Updated spare-part links',
       content: {
         'application/json': {
-          schema: z.object({ data: z.array(ProductSparepartLinkItemSchema) }),
+          schema: ProductSparepartsListEnvelopeSchema,
         },
       },
     },
@@ -354,37 +376,38 @@ export function createPublicProductsRoutes(productsService: ProductsService) {
     .openapi(listProductsRoute, async (c) => {
       const query = c.req.valid('query');
       const page = await productsService.listPublicProducts(query);
-      return c.json({ data: [...page.data], meta: page.meta }, 200);
+      return c.json(okPage(page, 'Products retrieved successfully'), 200);
     })
     .openapi(compareProductsRoute, async (c) => {
       const query = c.req.valid('query');
       const result = await productsService.compareProducts(query);
       return c.json(
-        {
-          data: {
+        ok(
+          {
             specSchema: [...result.specSchema],
             products: [...result.products],
           },
-        },
+          'Product comparison retrieved successfully',
+        ),
         200,
       );
     })
     .openapi(recommendationsRoute, async (c) => {
       const query = c.req.valid('query');
       const data = await productsService.listRecommendations(query);
-      return c.json({ data: [...data] }, 200);
+      return c.json(ok([...data], 'Product recommendations retrieved successfully'), 200);
     })
     .openapi(listSparepartsRoute, async (c) => {
       const { id } = c.req.valid('param');
       const query = c.req.valid('query');
       const page = await productsService.listProductSpareparts(id, query);
-      return c.json({ data: [...page.data], meta: page.meta }, 200);
+      return c.json(okPage(page, 'Product spare parts retrieved successfully'), 200);
     })
     .openapi(getProductBySlugRoute, async (c) => {
       const { slug } = c.req.valid('param');
       const query = c.req.valid('query');
       const data = await productsService.getPublicProductBySlug(slug, query);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Product retrieved successfully'), 200);
     });
 }
 
@@ -402,26 +425,26 @@ export function createAdminProductsRoutes(
       const actor = getRequiredAdmin(c);
       const query = c.req.valid('query');
       const page = await productsService.listAdminProducts(actor, query);
-      return c.json({ data: [...page.data], meta: page.meta }, 200);
+      return c.json(okPage(page, 'Products retrieved successfully'), 200);
     })
     .openapi(getAdminProductRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const { id } = c.req.valid('param');
       const data = await productsService.getAdminProductById(actor, id);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Product retrieved successfully'), 200);
     })
     .openapi(createProductRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const body = c.req.valid('json');
       const data = await productsService.createProduct(actor, body);
-      return c.json({ data }, 201);
+      return c.json(ok(data, 'Product created successfully'), 201);
     })
     .openapi(updateProductRoute, async (c) => {
       const actor = getRequiredAdmin(c);
       const { id } = c.req.valid('param');
       const body = c.req.valid('json');
       const data = await productsService.updateProduct(actor, id, body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'Product updated successfully'), 200);
     })
     .openapi(deleteProductRoute, async (c) => {
       const actor = getRequiredAdmin(c);
@@ -434,6 +457,6 @@ export function createAdminProductsRoutes(
       const { id } = c.req.valid('param');
       const body = c.req.valid('json');
       const data = await productsService.replaceProductSpareparts(actor, id, body);
-      return c.json({ data: [...data] }, 200);
+      return c.json(ok([...data], 'Product spare parts updated successfully'), 200);
     });
 }

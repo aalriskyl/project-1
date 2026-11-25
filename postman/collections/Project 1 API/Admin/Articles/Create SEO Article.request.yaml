@@ -14,6 +14,24 @@ body:
       "contentMd": "## 1. Hitung Kebutuhan Daya (kVA)\n\nPastikan cadangan daya minimal 20%...",
       "coverImageUrl": "{{uploadedPublicUrl}}",
       "metaTitle": "Cara Memilih Genset Silent 30 kVA | Tsuzumi Japan",
+      "metaDescription": "Panduan memilih kapasitas genset silent 30 kVA, engine Perkins vs Cummins, dan jadwal perawatan.",
+      "focusKeyword": "genset silent 30 kva",
+      "noIndex": false,
+      "ogImageUrl": "{{uploadedPublicUrl}}",
       "tags": ["genset", "perkins", "industri"],
       "isPublished": true
     }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('articleId', json.data.id);
+        }
+      }

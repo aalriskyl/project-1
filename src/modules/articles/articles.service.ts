@@ -1,7 +1,13 @@
 import type { ArticleRow } from '@/db/schema/articles.ts';
 import { NotFoundError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
-import { type CursorPage, decodeCursor, encodeCursor } from '@/lib/pagination.ts';
+import {
+  assertCursorOrPage,
+  buildOffsetPage,
+  type CursorPage,
+  decodeCursor,
+  encodeCursor,
+} from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { slugify } from '@/lib/slug.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
@@ -14,6 +20,7 @@ import type {
   ArticleSummary,
   CreateArticleBody,
   GetArticleQuery,
+  ListAdminArticlesQuery,
   ListArticlesQuery,
   RelatedProductCard,
   UpdateArticleBody,
@@ -31,7 +38,10 @@ const emptyRelatedProductsResolver: RelatedProductsResolver = () => Promise.reso
 export interface ArticlesService {
   listPublishedArticles(query: ListArticlesQuery): Promise<CursorPage<ArticleSummary>>;
   getPublishedArticleBySlug(slug: string, query: GetArticleQuery): Promise<ArticleDetail>;
-  listAdminArticles(actor: AuthUser, query: ListArticlesQuery): Promise<CursorPage<ArticleSummary>>;
+  listAdminArticles(
+    actor: AuthUser,
+    query: ListAdminArticlesQuery,
+  ): Promise<CursorPage<ArticleSummary>>;
   getAdminArticleById(actor: AuthUser, id: string): Promise<ArticleDetail>;
   createArticle(actor: AuthUser, input: CreateArticleBody): Promise<ArticleDetail>;
   updateArticle(actor: AuthUser, id: string, input: UpdateArticleBody): Promise<ArticleDetail>;
@@ -48,6 +58,10 @@ export function serializeArticleSummary(row: ArticleSummaryRow): ArticleSummary 
     coverImageUrl: row.coverImageUrl,
     metaTitle: row.metaTitle,
     metaDescription: row.metaDescription,
+    focusKeyword: row.focusKeyword,
+    canonicalUrl: row.canonicalUrl,
+    noIndex: row.noIndex,
+    ogImageUrl: row.ogImageUrl,
     tags: [...row.tags],
     isPublished: row.isPublished,
     publishedAt: row.publishedAt !== null ? row.publishedAt.toISOString() : null,
@@ -91,6 +105,7 @@ export function createArticlesService(
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
         ...(query.tag !== undefined ? { tag: query.tag } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
       const hasMore = rows.length > query.limit;
@@ -134,14 +149,28 @@ export function createArticlesService(
 
     async listAdminArticles(
       actor: AuthUser,
-      query: ListArticlesQuery,
+      query: ListAdminArticlesQuery,
     ): Promise<CursorPage<ArticleSummary>> {
       assertAdminUser(actor);
+      assertCursorOrPage(query);
+
+      if (query.page !== undefined) {
+        const offset = (query.page - 1) * query.limit;
+        const { items, total } = await articlesRepo.listAdminOffset({
+          limit: query.limit,
+          offset,
+          ...(query.tag !== undefined ? { tag: query.tag } : {}),
+          ...(query.q !== undefined ? { query: query.q } : {}),
+        });
+        return buildOffsetPage(items.map(serializeArticleSummary), total, query.page, query.limit);
+      }
 
       const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
       const rows = await articlesRepo.listAdminCursor({
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.tag !== undefined ? { tag: query.tag } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
       const hasMore = rows.length > query.limit;
@@ -188,6 +217,10 @@ export function createArticlesService(
         coverImageUrl: input.coverImageUrl ?? null,
         metaTitle: input.metaTitle ?? null,
         metaDescription: input.metaDescription ?? null,
+        focusKeyword: input.focusKeyword ?? null,
+        canonicalUrl: input.canonicalUrl ?? null,
+        noIndex: input.noIndex,
+        ogImageUrl: input.ogImageUrl ?? null,
         tags: input.tags,
         relatedProductIds: input.relatedProductIds,
         isPublished: input.isPublished,
@@ -225,6 +258,10 @@ export function createArticlesService(
         ...(input.coverImageUrl !== undefined ? { coverImageUrl: input.coverImageUrl } : {}),
         ...(input.metaTitle !== undefined ? { metaTitle: input.metaTitle } : {}),
         ...(input.metaDescription !== undefined ? { metaDescription: input.metaDescription } : {}),
+        ...(input.focusKeyword !== undefined ? { focusKeyword: input.focusKeyword } : {}),
+        ...(input.canonicalUrl !== undefined ? { canonicalUrl: input.canonicalUrl } : {}),
+        ...(input.noIndex !== undefined ? { noIndex: input.noIndex } : {}),
+        ...(input.ogImageUrl !== undefined ? { ogImageUrl: input.ogImageUrl } : {}),
         ...(input.tags !== undefined ? { tags: input.tags } : {}),
         ...(input.relatedProductIds !== undefined
           ? { relatedProductIds: input.relatedProductIds }

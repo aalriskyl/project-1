@@ -1,0 +1,4 @@
+$kind: collection
+name: Reviews
+description: Admin product review moderation and deletion endpoints.
+order: 5000

@@ -108,6 +108,12 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     expect(dupRes.status).toBe(409);
 
     // Buyer 2 submits 4-star review -> ratingAvg becomes 4.5, reviewCount = 2
+    const forgedPurchase = await testApp.request(`/v1/products/${prod.id}/reviews`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${buyer2Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: 5, orderId: '01936c8e-7f2a-7000-8000-000000000999' }),
+    });
+    expect(forgedPurchase.status).toBe(422);
     const rev2Res = await testApp.request(`/v1/products/${prod.id}/reviews`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${buyer2Token}`, 'Content-Type': 'application/json' },
@@ -140,6 +146,18 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     ).data;
     expect(prodAfterUnpub.ratingAvg).toBe(5);
     expect(prodAfterUnpub.reviewCount).toBe(1);
+
+    // Admin reviews moderation list supports ?isPublished=false & optional ?page= with total/totalPages
+    const adminUnpubList = ProductReviewCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/reviews?isPublished=false&page=1&limit=10', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminUnpubList.data).toHaveLength(1);
+    expect(adminUnpubList.meta.total).toBe(1);
+    expect(adminUnpubList.meta.totalPages).toBe(1);
 
     // Admin deletes Buyer 1's review -> ratingAvg resets to 0, reviewCount = 0
     const delRes = await testApp.request(`/v1/admin/reviews/${rev1.id}`, {

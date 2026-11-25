@@ -1,0 +1,15 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/admin/media/{{uploadId}}/complete'
+order: 3650
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Upload is verified', () => {
+        pm.response.to.have.status(200);
+        const data = pm.response.json().data;
+        pm.expect(data.status).to.eql('verified');
+        pm.expect(data.uploadId).to.eql(pm.environment.get('uploadId'));
+        pm.environment.set('uploadedPublicUrl', data.publicUrl);
+      });

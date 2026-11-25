@@ -1,6 +1,7 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
+import { ok, okPage } from '@/lib/response.ts';
 import { getRequiredUser, requireAuth } from '@/middlewares/auth.ts';
 import {
   ListUsersQuerySchema,
@@ -16,7 +17,8 @@ const getMeRoute = createRoute({
   method: 'get',
   path: '/me',
   tags: ['Users'],
-  summary: 'Get the authenticated user profile',
+  summary: 'Get Current User',
+  description: 'Fetch the authenticated user profile.',
   security: [{ BearerAuth: [] }],
   responses: {
     200: {
@@ -38,7 +40,8 @@ const updateMeRoute = createRoute({
   method: 'patch',
   path: '/me',
   tags: ['Users'],
-  summary: 'Update the authenticated user profile',
+  summary: 'Update Current User',
+  description: 'Update the authenticated user display name or E.164 phone number.',
   security: [{ BearerAuth: [] }],
   request: {
     body: {
@@ -66,14 +69,16 @@ const listUsersRoute = createRoute({
   method: 'get',
   path: '/',
   tags: ['Users'],
-  summary: 'List users with cursor pagination (admin only)',
+  summary: 'Admin: List Users',
+  description:
+    'List users with cursor or optional numbered `?page=` pagination, `?q=` fuzzy search, and `?role=` filter.',
   security: [{ BearerAuth: [] }],
   request: {
     query: ListUsersQuerySchema,
   },
   responses: {
     200: {
-      description: 'Cursor-paginated user list',
+      description: 'Paginated user list',
       content: { 'application/json': { schema: UserCursorPageSchema } },
     },
     401: {
@@ -95,7 +100,8 @@ const getUserByIdRoute = createRoute({
   method: 'get',
   path: '/{id}',
   tags: ['Users'],
-  summary: 'Get a user by ID (self or admin)',
+  summary: 'Get User by ID',
+  description: 'Fetch a user profile by ID (restricted to self or admin).',
   security: [{ BearerAuth: [] }],
   request: {
     params: UserIdParamSchema,
@@ -136,30 +142,24 @@ export function createUsersRoutes(
     .openapi(getMeRoute, async (c) => {
       const actor = getRequiredUser(c);
       const data = await usersService.getMe(actor);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'User profile retrieved successfully'), 200);
     })
     .openapi(updateMeRoute, async (c) => {
       const actor = getRequiredUser(c);
       const body = c.req.valid('json');
       const data = await usersService.updateMe(actor, body);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'User profile updated successfully'), 200);
     })
     .openapi(listUsersRoute, async (c) => {
       const actor = getRequiredUser(c);
       const query = c.req.valid('query');
       const page = await usersService.listUsers(actor, query);
-      return c.json(
-        {
-          data: [...page.data],
-          meta: page.meta,
-        },
-        200,
-      );
+      return c.json(okPage(page, 'Users retrieved successfully'), 200);
     })
     .openapi(getUserByIdRoute, async (c) => {
       const actor = getRequiredUser(c);
       const { id } = c.req.valid('param');
       const data = await usersService.getUserById(actor, id);
-      return c.json({ data }, 200);
+      return c.json(ok(data, 'User retrieved successfully'), 200);
     });
 }

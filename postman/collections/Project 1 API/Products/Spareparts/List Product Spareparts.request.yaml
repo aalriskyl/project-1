@@ -1,0 +1,29 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/products/:id/spareparts?limit=20'
+order: 4500
+pathVariables:
+  - key: id
+    value: '{{productId}}'
+    description: Parent equipment product UUIDv7
+queryParams:
+  - key: limit
+    value: '20'
+  - key: cursor
+    value: ''
+    disabled: true
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns standardized paginated spareparts list', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data).to.be.an('array');
+        if (json.data[0]?.id) {
+          pm.environment.set('sparepartProductId', json.data[0].id);
+        }
+      });

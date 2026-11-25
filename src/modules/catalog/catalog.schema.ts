@@ -1,6 +1,12 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
-import { QueryBooleanSchema } from '@/lib/pagination.ts';
+import { AssetImageUrlSchema, CanonicalUrlSchema } from '@/lib/asset-url.ts';
+import {
+  AdminPaginationQuerySchema,
+  createCursorPageSchema,
+  QueryBooleanSchema,
+} from '@/lib/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
+import { SearchQueryParamSchema } from '@/lib/search.ts';
 
 export const SpecFieldTypeSchema = z.enum(['number', 'text', 'boolean']);
 
@@ -48,6 +54,10 @@ export const CategorySchema = z
       .nullable()
       .openapi({ example: 'Jual Genset Silent 10-500 kVA | Tsuzumi' }),
     metaDescription: z.string().nullable(),
+    focusKeyword: z.string().nullable().openapi({ example: 'genset silent' }),
+    canonicalUrl: z.string().nullable(),
+    noIndex: z.boolean(),
+    ogImageUrl: z.string().nullable(),
     imageUrl: z.string().nullable(),
     bannerImageUrl: z.string().nullable(),
     specSchema: z.array(SpecFieldDefSchema),
@@ -88,9 +98,16 @@ export const ListCategoriesQuerySchema = z.object({
     description: 'When true, nests subcategories inside root categories under `children`',
     example: 'true',
   }),
+  q: SearchQueryParamSchema,
 });
 
 export type ListCategoriesQuery = z.infer<typeof ListCategoriesQuerySchema>;
+
+export const ListAdminCategoriesQuerySchema = AdminPaginationQuerySchema.extend({
+  q: SearchQueryParamSchema,
+});
+
+export type ListAdminCategoriesQuery = z.infer<typeof ListAdminCategoriesQuerySchema>;
 
 export const CategorySlugParamSchema = z.object({
   slug: SlugInputSchema.openapi({
@@ -113,6 +130,10 @@ export const CreateCategoryBodySchema = z
     description: z.string().trim().max(5_000).nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().default(false),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     imageUrl: AssetImageUrlSchema.nullable().optional(),
     bannerImageUrl: AssetImageUrlSchema.nullable().optional(),
     specSchema: SpecSchemaArraySchema.default([]),
@@ -131,6 +152,10 @@ export const UpdateCategoryBodySchema = z
     description: z.string().trim().max(5_000).nullable().optional(),
     metaTitle: z.string().trim().max(160).nullable().optional(),
     metaDescription: z.string().trim().max(320).nullable().optional(),
+    focusKeyword: z.string().trim().max(120).nullable().optional(),
+    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
+    noIndex: z.boolean().optional(),
+    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
     imageUrl: AssetImageUrlSchema.nullable().optional(),
     bannerImageUrl: AssetImageUrlSchema.nullable().optional(),
     specSchema: SpecSchemaArraySchema.optional(),
@@ -141,19 +166,25 @@ export const UpdateCategoryBodySchema = z
 
 export type UpdateCategoryBody = z.infer<typeof UpdateCategoryBodySchema>;
 
-export const CategoryEnvelopeSchema = z
-  .object({ data: CategorySchema })
-  .openapi('CategoryEnvelope');
+export const CategoryEnvelopeSchema = createSuccessEnvelopeSchema(
+  CategorySchema,
+  'CategoryEnvelope',
+);
 
-export const CategoryDetailEnvelopeSchema = z
-  .object({ data: CategoryDetailSchema })
-  .openapi('CategoryDetailEnvelope');
+export const CategoryDetailEnvelopeSchema = createSuccessEnvelopeSchema(
+  CategoryDetailSchema,
+  'CategoryDetailEnvelope',
+);
 
-export const CategoryListEnvelopeSchema = z
-  .object({
-    data: z.array(z.union([CategoryTreeNodeSchema, CategorySchema])),
-  })
-  .openapi('CategoryListEnvelope');
+export const CategoryListEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.array(z.union([CategoryTreeNodeSchema, CategorySchema])),
+  'CategoryListEnvelope',
+);
+
+export const CategoryCursorPageSchema = createCursorPageSchema(
+  CategorySchema,
+  'CategoryCursorPage',
+);
 
 export const SitemapEntrySchema = z
   .object({
@@ -164,14 +195,13 @@ export const SitemapEntrySchema = z
 
 export type SitemapEntry = z.infer<typeof SitemapEntrySchema>;
 
-export const SitemapResponseSchema = z
-  .object({
-    data: z.object({
-      categories: z.array(SitemapEntrySchema),
-      products: z.array(SitemapEntrySchema),
-      articles: z.array(SitemapEntrySchema),
-    }),
-  })
-  .openapi('SitemapResponse');
+export const SitemapResponseSchema = createSuccessEnvelopeSchema(
+  z.object({
+    categories: z.array(SitemapEntrySchema),
+    products: z.array(SitemapEntrySchema),
+    articles: z.array(SitemapEntrySchema),
+  }),
+  'SitemapResponse',
+);
 
 export type SitemapData = z.infer<typeof SitemapResponseSchema>['data'];

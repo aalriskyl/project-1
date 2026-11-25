@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { PhoneE164Schema, UserSchema } from '@/modules/users/users.schema.ts';
 
 export const RegisterBodySchema = z
@@ -100,16 +101,14 @@ export const AuthSessionSchema = z
 
 export type AuthSession = z.infer<typeof AuthSessionSchema>;
 
-export const AuthSessionEnvelopeSchema = z
-  .object({
-    data: AuthSessionSchema,
-  })
-  .openapi('AuthSessionEnvelope');
+export const AuthSessionEnvelopeSchema = createSuccessEnvelopeSchema(
+  AuthSessionSchema,
+  'AuthSessionEnvelope',
+);
 
-export const ForgotPasswordEnvelopeSchema = z
-  .object({
-    data: z.object({
-      message: z.string(),
-    }),
-  })
-  .openapi('ForgotPasswordEnvelope');
+export const ForgotPasswordEnvelopeSchema = createSuccessEnvelopeSchema(
+  z.object({
+    message: z.string(),
+  }),
+  'ForgotPasswordEnvelope',
+);

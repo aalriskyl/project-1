@@ -1,0 +1,2 @@
+CREATE INDEX "articles_search_trgm_gin_idx" ON "articles" USING gin (("title" || ' ' || "slug" || ' ' || coalesce("excerpt", '')) extensions.gin_trgm_ops);--> statement-breakpoint
+CREATE INDEX "categories_search_trgm_gin_idx" ON "categories" USING gin (("name" || ' ' || "slug" || ' ' || coalesce("description", '')) extensions.gin_trgm_ops);

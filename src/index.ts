@@ -1,13 +1,33 @@
 import { app } from '@/app.ts';
 import { env } from '@/config/env.ts';
-import { closeDb } from '@/db/client.ts';
+import { closeDb, db } from '@/db/client.ts';
 import { logger } from '@/lib/logger.ts';
+import { closeRateLimitStore } from '@/lib/redis-rate-limit.ts';
+import { startMailWorker } from '@/lib/mail-worker.ts';
+import { mailProvider } from '@/lib/mailer.ts';
+import { createNotificationsRepository } from '@/modules/notifications/notifications.repository.ts';
+import { createNotificationsService } from '@/modules/notifications/notifications.service.ts';
 
 const server = Bun.serve({
   hostname: env.HOST,
   port: env.PORT,
-  fetch: app.fetch,
+  fetch(request, server) {
+    return app.fetch(request, { clientIp: server.requestIP(request)?.address });
+  },
 });
+
+const stopMailWorker =
+  env.MAIL_OUTBOX_ENCRYPTION_KEY !== undefined && env.RESEND_API_KEY !== undefined
+    ? startMailWorker(
+        createNotificationsService(
+          createNotificationsRepository(db),
+          mailProvider,
+          env.MAIL_OUTBOX_ENCRYPTION_KEY,
+          logger,
+        ),
+        logger,
+      )
+    : async (): Promise<void> => {};
 
 logger.info(
   {
@@ -30,6 +50,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
   try {
     // Stop accepting new connections while allowing active requests to complete.
     await server.stop(false);
+    await stopMailWorker();
+    closeRateLimitStore();
     await closeDb();
     logger.info('graceful shutdown complete');
     process.exit(0);

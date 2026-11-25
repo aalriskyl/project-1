@@ -1,0 +1,31 @@
+$kind: http-request
+method: PATCH
+url: '{{baseUrl}}/v1/admin/articles/:id'
+order: 2200
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: id
+    value: '{{articleId}}'
+    description: Article UUIDv7
+body:
+  type: json
+  content: |-
+    {
+      "isPublished": true,
+      "focusKeyword": "genset silent 30 kva",
+      "noIndex": false
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns updated article envelope', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.id).to.be.a('string');
+      });
