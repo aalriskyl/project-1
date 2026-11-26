@@ -34,6 +34,17 @@ export function buildStoragePublicPrefix(supabaseUrl: string, bucket: string): s
   return `${normalizedBase}/storage/v1/object/public/${encodeURIComponent(bucket)}/`;
 }
 
+function hasPathTraversal(rawPath: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return true;
+  }
+  const segments = decoded.split('/');
+  return segments.some((seg) => seg === '..' || seg === '.' || seg.includes('\\'));
+}
+
 /**
  * Validates that an image URL belongs to our configured Supabase Storage public bucket.
  * In `development` and `test`, explicit test/placeholder hosts (`placehold.co`, `*.test`)
@@ -50,6 +61,10 @@ export function isAllowedAssetImageUrl(
     return false;
   }
 
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    return false;
+  }
+
   if (parsed.protocol !== 'https:') {
     if (
       policy.nodeEnv !== 'production' &&
@@ -61,25 +76,33 @@ export function isAllowedAssetImageUrl(
     return false;
   }
 
+  const bucketPathPrefix = `/storage/v1/object/public/${encodeURIComponent(policy.bucket)}/`;
+
   if (policy.supabaseUrl !== undefined) {
-    const prefix = buildStoragePublicPrefix(policy.supabaseUrl, policy.bucket);
+    const supabaseOrigin = new URL(policy.supabaseUrl).origin;
     if (
-      parsed.href.startsWith(prefix) &&
-      parsed.href.length > prefix.length &&
-      !parsed.username &&
-      !parsed.password
+      parsed.origin === supabaseOrigin &&
+      parsed.pathname.startsWith(bucketPathPrefix) &&
+      parsed.pathname.length > bucketPathPrefix.length
     ) {
-      return true;
+      const objectPath = parsed.pathname.slice(bucketPathPrefix.length);
+      if (objectPath.length > 0 && !hasPathTraversal(objectPath)) {
+        return true;
+      }
+      return false;
     }
   }
 
   if (policy.nodeEnv !== 'production') {
-    if (
-      DEV_TEST_ALLOWED_IMAGE_HOSTS.has(parsed.hostname) ||
-      parsed.hostname.endsWith('.test') ||
-      parsed.pathname.startsWith(`/storage/v1/object/public/${encodeURIComponent(policy.bucket)}/`)
-    ) {
+    if (DEV_TEST_ALLOWED_IMAGE_HOSTS.has(parsed.hostname) || parsed.hostname.endsWith('.test')) {
       return true;
+    }
+    if (
+      parsed.pathname.startsWith(bucketPathPrefix) &&
+      parsed.pathname.length > bucketPathPrefix.length
+    ) {
+      const objectPath = parsed.pathname.slice(bucketPathPrefix.length);
+      return objectPath.length > 0 && !hasPathTraversal(objectPath);
     }
   }
 
@@ -104,7 +127,12 @@ export function isAllowedAssetVideoUrl(
     return false;
   }
 
-  return parsed.protocol === 'https:' && ALLOWED_VIDEO_HOSTS.has(parsed.hostname);
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.username.length === 0 &&
+    parsed.password.length === 0 &&
+    ALLOWED_VIDEO_HOSTS.has(parsed.hostname)
+  );
 }
 
 /**
@@ -116,19 +144,21 @@ export function extractReferencedObjectPaths(
   origin: string | undefined = env.SUPABASE_URL,
 ): Set<string> {
   const marker = `/storage/v1/object/public/${encodeURIComponent(bucket)}/`;
+  const expectedOrigin = origin !== undefined ? new URL(origin).origin : undefined;
   const found = new Set<string>();
   const urlPattern = /https?:\/\/[^\s)"'<>]+/g;
 
   for (const entry of textsAndUrls) {
     if (!entry) continue;
     const matches = entry.match(urlPattern) ?? [];
-    for (const candidate of matches) {
+    for (const rawMatch of matches) {
+      const candidate = rawMatch.replace(/[.,;:!?`\]]+$/, '');
       if (!URL.canParse(candidate)) continue;
-      if (origin !== undefined && new URL(candidate).origin !== new URL(origin).origin) continue;
-      const idx = candidate.indexOf(marker);
-      if (idx !== -1) {
-        const rawPath = candidate.slice(idx + marker.length).split(/[?#]/)[0];
-        if (rawPath !== undefined && rawPath.length > 0) {
+      const parsed = new URL(candidate);
+      if (expectedOrigin !== undefined && parsed.origin !== expectedOrigin) continue;
+      if (parsed.pathname.startsWith(marker) && parsed.pathname.length > marker.length) {
+        const rawPath = parsed.pathname.slice(marker.length);
+        if (rawPath.length > 0 && !hasPathTraversal(rawPath)) {
           try {
             found.add(decodeURIComponent(rawPath));
           } catch {
@@ -157,6 +187,7 @@ export const CanonicalUrlSchema = z
     (raw) => {
       try {
         const parsed = new URL(raw);
+        if (parsed.username.length > 0 || parsed.password.length > 0) return false;
         if (parsed.protocol === 'https:') return true;
         return (
           env.NODE_ENV !== 'production' &&
@@ -167,5 +198,5 @@ export const CanonicalUrlSchema = z
         return false;
       }
     },
-    { message: 'Canonical URL must use https://' },
+    { message: 'Canonical URL must use https:// without embedded credentials' },
   );

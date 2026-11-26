@@ -87,9 +87,13 @@ export const products = pgTable(
       (): SQL =>
         sql`to_tsvector('simple', coalesce(${products.name}, '') || ' ' || coalesce(${products.sku}, '') || ' ' || coalesce(${products.brandSlug}, '') || ' ' || coalesce(${products.descriptionMd}, ''))`,
     ),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, precision: 3, mode: 'date' }),
   },
   (table) => [
     check(
@@ -116,11 +120,17 @@ export const products = pgTable(
     index('products_active_created_id_idx')
       .on(table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} is null and ${table.isActive} = true`),
+    index('products_active_price_id_idx')
+      .on(table.priceIdr, table.id)
+      .where(sql`${table.deletedAt} is null and ${table.isActive} = true`),
+    index('products_active_rating_id_idx')
+      .on(table.ratingAvg.desc(), table.reviewCount.desc(), table.id.desc())
+      .where(sql`${table.deletedAt} is null and ${table.isActive} = true`),
     index('products_specs_gin_idx').using('gin', table.specs.op('jsonb_path_ops')),
     index('products_search_vector_gin_idx').using('gin', table.searchVector),
     index('products_name_sku_trgm_gin_idx').using(
       'gin',
-      sql`(${table.name} || ' ' || coalesce(${table.sku}, '')) extensions.gin_trgm_ops`,
+      sql`(${table.name} || ' ' || coalesce(${table.sku}, '') || ' ' || coalesce(${table.brandSlug}, '')) extensions.gin_trgm_ops`,
     ),
   ],
 ).enableRLS();

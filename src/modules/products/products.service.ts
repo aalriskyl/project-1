@@ -60,6 +60,8 @@ const SlugValidator = z
   .max(280)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
+const MAX_POSTGRES_INT4 = 2_147_483_647;
+
 const ProductSortCursorPayloadSchema = z.discriminatedUnion('sort', [
   z.object({
     sort: z.literal('price_asc'),
@@ -73,8 +75,14 @@ const ProductSortCursorPayloadSchema = z.discriminatedUnion('sort', [
   }),
   z.object({
     sort: z.literal('rating_desc'),
-    ratingAvg: z.string().regex(/^\d+(?:\.\d{1,2})?$/),
-    reviewCount: z.number().int().nonnegative(),
+    ratingAvg: z
+      .string()
+      .regex(/^\d+(?:\.\d{1,2})?$/)
+      .refine((value) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0 && parsed <= 5;
+      }, 'ratingAvg must be between 0 and 5'),
+    reviewCount: z.number().int().min(0).max(MAX_POSTGRES_INT4),
     id: z.uuid(),
   }),
 ]);
@@ -269,6 +277,7 @@ export function createProductsService(
 ): ProductsService {
   async function resolveCategoryWithSchema(categoryId: string): Promise<{
     readonly category: CategoryRow;
+    readonly parent: CategoryRow | null;
     readonly effectiveSpecSchema: SpecFieldDef[];
   }> {
     const category = await catalogRepo.findById(categoryId);
@@ -281,8 +290,25 @@ export function createProductsService(
 
     return {
       category,
+      parent,
       effectiveSpecSchema: mergeEffectiveSpecSchema(parent?.specSchema ?? [], category.specSchema),
     };
+  }
+
+  function isCategoryHierarchyActive(schemaInfo: {
+    readonly category: CategoryRow;
+    readonly parent: CategoryRow | null;
+  }): boolean {
+    if (!isRecordActive(schemaInfo.category)) {
+      return false;
+    }
+    if (
+      schemaInfo.category.parentId !== null &&
+      (schemaInfo.parent === null || !isRecordActive(schemaInfo.parent))
+    ) {
+      return false;
+    }
+    return true;
   }
 
   function serializeProductDetail(
@@ -489,13 +515,34 @@ export function createProductsService(
       }
 
       const uniqueCatIds = [...new Set(orderedRows.map((r) => r.categoryId))];
-      const schemasEntries = await Promise.all(
-        uniqueCatIds.map(async (catId) => {
-          const info = await resolveCategoryWithSchema(catId);
-          return [catId, info.effectiveSpecSchema] as const;
-        }),
-      );
-      const schemaByCatId = new Map(schemasEntries);
+      const fetchedCats = await catalogRepo.findByIds(uniqueCatIds);
+      const catById = new Map(fetchedCats.map((c) => [c.id, c]));
+      const missingParentIds = [
+        ...new Set(
+          fetchedCats
+            .map((c) => c.parentId)
+            .filter((pid): pid is string => pid !== null && !catById.has(pid)),
+        ),
+      ];
+      if (missingParentIds.length > 0) {
+        const fetchedParents = await catalogRepo.findByIds(missingParentIds);
+        for (const parent of fetchedParents) {
+          catById.set(parent.id, parent);
+        }
+      }
+
+      const schemaByCatId = new Map<string, SpecFieldDef[]>();
+      for (const catId of uniqueCatIds) {
+        const category = catById.get(catId);
+        if (category === undefined) {
+          throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+        }
+        const parent = category.parentId !== null ? (catById.get(category.parentId) ?? null) : null;
+        schemaByCatId.set(
+          catId,
+          mergeEffectiveSpecSchema(parent?.specSchema ?? [], category.specSchema),
+        );
+      }
 
       // Build deterministic union of specSchema definitions across compared products
       const mergedDefsMap = new Map<string, SpecFieldDef>();
@@ -520,8 +567,22 @@ export function createProductsService(
     },
 
     async listRecommendations(query: RecommendationsQuery): Promise<readonly ProductCard[]> {
+      let categoryIds: string[] | undefined;
+      if (query.categoryId !== undefined) {
+        const matchedCat = await catalogRepo.findById(query.categoryId);
+        if (matchedCat === null || !isRecordActive(matchedCat)) {
+          return [];
+        }
+        if (matchedCat.parentId === null) {
+          const children = await catalogRepo.listActiveChildren(matchedCat.id);
+          categoryIds = [matchedCat.id, ...children.map((child) => child.id)];
+        } else {
+          categoryIds = [matchedCat.id];
+        }
+      }
+
       const rows = await productsRepo.listRecommendations({
-        ...(query.categoryId !== undefined ? { categoryId: query.categoryId } : {}),
+        ...(categoryIds !== undefined ? { categoryIds } : {}),
         ...(query.excludeProductId !== undefined
           ? { excludeProductId: query.excludeProductId }
           : {}),
@@ -618,12 +679,12 @@ export function createProductsService(
       assertAdminUser(actor);
 
       const schemaInfo = await resolveCategoryWithSchema(input.categoryId);
-      if (!isRecordActive(schemaInfo.category)) {
+      const resolvedActive = resolveActiveStateInput(input) ?? true;
+      if (resolvedActive && !isCategoryHierarchyActive(schemaInfo)) {
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
       validateSpecsAgainstSchema(input.specs, schemaInfo.effectiveSpecSchema);
 
-      const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.name, 260);
       const { media, primaryImageUrl } = normalizeMediaItems(input.media);
 
@@ -676,17 +737,18 @@ export function createProductsService(
 
       const nextCategoryId = input.categoryId ?? existing.categoryId;
       const schemaInfo = await resolveCategoryWithSchema(nextCategoryId);
+      const nextActive = resolveActiveStateInput(input);
+      const willBeActive = nextActive ?? isRecordActive(existing);
       if (
-        input.categoryId !== undefined &&
-        input.categoryId !== existing.categoryId &&
-        !isRecordActive(schemaInfo.category)
+        (willBeActive ||
+          (input.categoryId !== undefined && input.categoryId !== existing.categoryId)) &&
+        !isCategoryHierarchyActive(schemaInfo)
       ) {
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
       const nextSpecs = input.specs ?? existing.specs;
       validateSpecsAgainstSchema(nextSpecs, schemaInfo.effectiveSpecSchema);
 
-      const nextActive = resolveActiveStateInput(input);
       const activePatch =
         nextActive !== undefined
           ? {
@@ -739,6 +801,7 @@ export function createProductsService(
 
       revalidator.notify([
         'products',
+        'articles',
         `product:${existing.slug}`,
         `product:${updated.slug}`,
         'sitemap',
@@ -756,7 +819,7 @@ export function createProductsService(
       }
 
       await productsRepo.softDeleteById(id, existing.deletedAt ?? new Date());
-      revalidator.notify(['products', `product:${existing.slug}`, 'sitemap']);
+      revalidator.notify(['products', 'articles', `product:${existing.slug}`, 'sitemap']);
     },
 
     async replaceProductSpareparts(
@@ -767,8 +830,13 @@ export function createProductsService(
       assertAdminUser(actor);
 
       const parent = await productsRepo.findById(productId);
-      if (parent === null) {
+      if (parent === null || !isRecordActive(parent)) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+      }
+      if (parent.productType !== 'equipment') {
+        throw new ValidationError('Only equipment products can have linked spare parts', [
+          { field: 'id', message: 'Parent product must have productType="equipment"' },
+        ]);
       }
 
       for (const item of body.items) {
@@ -783,14 +851,25 @@ export function createProductsService(
       }
 
       if (body.items.length > 0) {
-        const targetIds = body.items.map((i) => i.sparepartProductId);
-        const foundTargets = await Promise.all(targetIds.map((id) => productsRepo.findById(id)));
-        const missingIdx = foundTargets.findIndex((r) => r === null);
-        if (missingIdx !== -1) {
-          throw new NotFoundError(
-            `Spare part product "${targetIds[missingIdx]}" not found`,
-            'SPAREPART_PRODUCT_NOT_FOUND',
-          );
+        const targetIds = body.items.map((item) => item.sparepartProductId);
+        const foundTargets = await productsRepo.findActiveByIds(targetIds);
+        const byId = new Map(foundTargets.map((row) => [row.id, row]));
+        for (const targetId of targetIds) {
+          const target = byId.get(targetId);
+          if (target === undefined) {
+            throw new NotFoundError(
+              `Spare part product "${targetId}" not found`,
+              'SPAREPART_PRODUCT_NOT_FOUND',
+            );
+          }
+          if (target.productType !== 'sparepart') {
+            throw new ValidationError('Linked product must be a spare part', [
+              {
+                field: 'items',
+                message: `Product "${targetId}" must have productType="sparepart"`,
+              },
+            ]);
+          }
         }
       }
 

@@ -1,4 +1,6 @@
+import { z } from '@hono/zod-openapi';
 import type { CategoryRow, SpecFieldDefRow } from '@/db/schema/categories.ts';
+import { noopCache, type ResponseCache } from '@/lib/cache.ts';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
@@ -7,18 +9,39 @@ import { slugify } from '@/lib/slug.ts';
 import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
-import type {
-  CategoryDetail,
-  CategoryTreeNode,
-  CreateCategoryBody,
-  ListAdminCategoriesQuery,
-  ListCategoriesQuery,
-  PublicCategory,
-  SitemapData,
-  SpecFieldDef,
-  UpdateCategoryBody,
+import {
+  type CategoryDetail,
+  CategorySchema,
+  type CategoryTreeNode,
+  CategoryTreeNodeSchema,
+  type CreateCategoryBody,
+  type ListAdminCategoriesQuery,
+  type ListCategoriesQuery,
+  type PublicCategory,
+  type SitemapData,
+  SitemapEntrySchema,
+  type SpecFieldDef,
+  type UpdateCategoryBody,
 } from '@/modules/catalog/catalog.schema.ts';
 import type { AuthUser } from '@/types/app.ts';
+
+const CATEGORIES_CACHE_TTL_SEC = 300;
+const SITEMAP_CACHE_TTL_SEC = 600;
+const CachedCategoryListSchema = z.array(z.union([CategoryTreeNodeSchema, CategorySchema]));
+const CachedSitemapSchema = z.object({
+  categories: z.array(SitemapEntrySchema),
+  products: z.array(SitemapEntrySchema),
+  articles: z.array(SitemapEntrySchema),
+});
+
+function buildPublicCategoriesCacheKey(query: ListCategoriesQuery): string | null {
+  if (query.q !== undefined || query.parentId !== undefined) {
+    return null;
+  }
+  const scope = query.rootOnly === true ? 'root' : query.rootOnly === false ? 'sub' : 'all';
+  const shape = query.tree === true ? 'tree' : 'flat';
+  return `categories:public:${scope}:${shape}`;
+}
 
 export interface CatalogService {
   listPublicCategories(
@@ -94,6 +117,7 @@ export function mergeEffectiveSpecSchema(
 export function createCatalogService(
   catalogRepo: CatalogRepository,
   revalidator: RevalidateNotifier = revalidateNotifier,
+  cache: ResponseCache = noopCache,
 ): CatalogService {
   async function validateParentAssignment(
     parentId: string | null | undefined,
@@ -122,7 +146,7 @@ export function createCatalogService(
     }
 
     if (selfId !== undefined) {
-      const hasChildren = await catalogRepo.hasNonDeletedChildren(selfId);
+      const hasChildren = await catalogRepo.hasAnyChildren(selfId);
       if (hasChildren) {
         throw new ConflictError(
           'Cannot convert a root category with existing subcategories into a subcategory',
@@ -136,6 +160,14 @@ export function createCatalogService(
     async listPublicCategories(
       query: ListCategoriesQuery,
     ): Promise<readonly (PublicCategory | CategoryTreeNode)[]> {
+      const cacheKey = buildPublicCategoriesCacheKey(query);
+      if (cacheKey !== null) {
+        const cached = await cache.getJson(cacheKey, CachedCategoryListSchema);
+        if (cached !== null) {
+          return cached;
+        }
+      }
+
       const hasFilter =
         query.q !== undefined || query.parentId !== undefined || query.rootOnly !== undefined;
       const rows = await catalogRepo.listActive(
@@ -150,6 +182,9 @@ export function createCatalogService(
       const serialized = rows.map(serializeCategory);
 
       if (query.tree !== true) {
+        if (cacheKey !== null) {
+          await cache.setJson(cacheKey, serialized, CATEGORIES_CACHE_TTL_SEC, ['categories']);
+        }
         return serialized;
       }
 
@@ -166,11 +201,9 @@ export function createCatalogService(
             ]
           : [];
       if (missingParentIds.length > 0) {
-        const fetchedParents = await Promise.all(
-          missingParentIds.map((pid) => catalogRepo.findById(pid)),
-        );
+        const fetchedParents = await catalogRepo.findByIds(missingParentIds);
         for (const parent of fetchedParents) {
-          if (parent !== null && isRecordActive(parent)) {
+          if (isRecordActive(parent)) {
             byId.set(parent.id, serializeCategory(parent));
           }
         }
@@ -189,10 +222,14 @@ export function createCatalogService(
         }
       }
 
-      return roots.map((root): CategoryTreeNode => ({
+      const tree = roots.map((root): CategoryTreeNode => ({
         ...root,
         children: childrenByParent.get(root.id) ?? [],
       }));
+      if (cacheKey !== null) {
+        await cache.setJson(cacheKey, tree, CATEGORIES_CACHE_TTL_SEC, ['categories']);
+      }
+      return tree;
     },
 
     async getPublicCategoryBySlug(slug: string): Promise<CategoryDetail> {
@@ -232,8 +269,13 @@ export function createCatalogService(
     },
 
     async getSitemap(): Promise<SitemapData> {
+      const cached = await cache.getJson('seo:sitemap', CachedSitemapSchema);
+      if (cached !== null) {
+        return cached;
+      }
+
       const index = await catalogRepo.listSitemapIndex();
-      return {
+      const data: SitemapData = {
         categories: index.categories.map((row) => ({
           slug: row.slug,
           updatedAt: row.updatedAt.toISOString(),
@@ -247,6 +289,8 @@ export function createCatalogService(
           updatedAt: row.updatedAt.toISOString(),
         })),
       };
+      await cache.setJson('seo:sitemap', data, SITEMAP_CACHE_TTL_SEC, ['sitemap']);
+      return data;
     },
 
     async listAdminCategories(
@@ -351,11 +395,16 @@ export function createCatalogService(
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
 
-      if (input.parentId !== undefined) {
-        await validateParentAssignment(input.parentId, id);
+      const nextActive = resolveActiveStateInput(input);
+      const effectiveParentId = input.parentId !== undefined ? input.parentId : existing.parentId;
+      const willBeActive = nextActive ?? isRecordActive(existing);
+      if (
+        input.parentId !== undefined ||
+        (willBeActive && !isRecordActive(existing) && effectiveParentId !== null)
+      ) {
+        await validateParentAssignment(effectiveParentId, id);
       }
 
-      const nextActive = resolveActiveStateInput(input);
       if (nextActive === false) {
         const [hasChildren, hasProducts] = await Promise.all([
           catalogRepo.hasNonDeletedChildren(id),

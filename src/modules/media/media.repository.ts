@@ -1,7 +1,9 @@
-import { and, asc, eq, inArray, isNull, lte, notExists } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, notExists, or } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { mediaReferences, type MediaUploadRow, mediaUploads } from '@/db/schema/media-uploads.ts';
 import { lockMediaLifecycle } from '@/modules/media/media-attachments.repository.ts';
+
+const ORPHAN_CLAIM_LEASE_MS = 15 * 60 * 1_000;
 
 export interface CreateMediaUploadRecord {
   readonly id: string;
@@ -20,6 +22,7 @@ export interface MediaRepository {
     readonly olderThan: Date;
     readonly limit: number;
   }): Promise<readonly MediaUploadRow[]>;
+  releaseOrphanClaims(ids: readonly string[]): Promise<void>;
   markDeletedByIds(ids: readonly string[], deletedAt: Date): Promise<void>;
 }
 export function createMediaRepository(db: Database): MediaRepository {
@@ -53,12 +56,15 @@ export function createMediaRepository(db: Database): MediaRepository {
     async claimOrphans({ olderThan, limit }) {
       return db.transaction(async (tx) => {
         await lockMediaLifecycle(tx);
+        const now = new Date();
+        const staleClaimCutoff = new Date(now.getTime() - ORPHAN_CLAIM_LEASE_MS);
         const rows = await tx
           .select()
           .from(mediaUploads)
           .where(
             and(
               isNull(mediaUploads.deletedAt),
+              or(isNull(mediaUploads.deletingAt), lte(mediaUploads.deletingAt, staleClaimCutoff)),
               lte(mediaUploads.createdAt, olderThan),
               notExists(
                 tx
@@ -73,7 +79,7 @@ export function createMediaRepository(db: Database): MediaRepository {
         if (rows.length > 0)
           await tx
             .update(mediaUploads)
-            .set({ deletingAt: new Date() })
+            .set({ deletingAt: now })
             .where(
               inArray(
                 mediaUploads.id,
@@ -82,6 +88,13 @@ export function createMediaRepository(db: Database): MediaRepository {
             );
         return rows;
       });
+    },
+    async releaseOrphanClaims(ids) {
+      if (ids.length > 0)
+        await db
+          .update(mediaUploads)
+          .set({ deletingAt: null })
+          .where(and(inArray(mediaUploads.id, [...ids]), isNull(mediaUploads.deletedAt)));
     },
     async markDeletedByIds(ids, deletedAt) {
       if (ids.length > 0)

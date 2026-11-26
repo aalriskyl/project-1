@@ -25,6 +25,13 @@ const adminActor: AuthUser = {
 describe('Products HTTP & cross-module integration (/v1/products, /compare, /articles, /seo/sitemap)', () => {
   async function setupApp() {
     const store = createInMemoryDatastore();
+    store.seedUser({
+      id: adminActor.id,
+      email: adminActor.email,
+      passwordHash: 'hash',
+      displayName: 'Products Admin',
+      role: 'admin',
+    });
     const adminToken = (await signAccessToken(adminActor)).token;
 
     const catalogService = createCatalogService(store.catalogRepo);
@@ -484,5 +491,45 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     expect(restoredProd.status).toBe('active');
     expect(restoredProd.deletedAt).toBeNull();
     expect((await testApp.request(`/v1/products/${prod2.slug}`)).status).toBe(200);
+
+    // Regression H6: spareparts rejects equipment target (422) and non-existent target (404)
+    expect(
+      (
+        await testApp.request(`/v1/admin/products/${prod1.id}/spareparts`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: [{ sparepartProductId: prod2.id }] }),
+        })
+      ).status,
+    ).toBe(422);
+
+    // Regression H8: creating an article with a nonexistent relatedProductId returns 404
+    expect(
+      (
+        await testApp.request('/v1/admin/articles', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Invalid Related Product Reference',
+            contentMd: 'Body',
+            relatedProductIds: ['01936c8e-7f2a-7000-8000-999999999999'],
+          }),
+        })
+      ).status,
+    ).toBe(404);
+
+    // Regression H10: oversized reviewCount in rating_desc cursor returns 422 (never PG int4 overflow 500)
+    const overflowCursor = Buffer.from(
+      JSON.stringify({
+        sort: 'rating_desc',
+        ratingAvg: '4.50',
+        reviewCount: 99_999_999_999,
+        id: prod1.id,
+      }),
+      'utf8',
+    ).toString('base64url');
+    expect(
+      (await testApp.request(`/v1/products?sort=rating_desc&cursor=${overflowCursor}`)).status,
+    ).toBe(422);
   });
 });

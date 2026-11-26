@@ -7,21 +7,48 @@ import { generateId } from '@/lib/id.ts';
 
 interface SeedReviewSpec {
   readonly productKey: string;
+  readonly authorSlot: 'primary' | 'secondary';
   readonly rating: number;
   readonly comment: string;
+  readonly isPublished: boolean;
 }
 
 const REVIEW_SPECS: readonly SeedReviewSpec[] = [
   {
     productKey: 'tpg30',
+    authorSlot: 'primary',
     rating: 5,
     comment:
       'Suara canopy sangat halus, uji beban 30 kVA stabil dan pengiriman teknisi tepat waktu.',
+    isPublished: true,
+  },
+  {
+    productKey: 'tpg30',
+    authorSlot: 'secondary',
+    rating: 4,
+    comment: 'Konsumsi solar irit untuk operasional klinik 12 jam. Panel DeepSea mudah dipantau.',
+    isPublished: true,
+  },
+  {
+    productKey: 'tpg50',
+    authorSlot: 'primary',
+    rating: 5,
+    comment: 'Genset 50 kVA handal untuk pabrik kami, start cepat saat listrik PLN padam.',
+    isPublished: true,
   },
   {
     productKey: 'tcc500',
+    authorSlot: 'primary',
     rating: 4,
     comment: 'Potongan aspal rapi dan rangka kokoh. Tangki air cukup besar untuk pekerjaan proyek.',
+    isPublished: true,
+  },
+  {
+    productKey: 'tcg100',
+    authorSlot: 'secondary',
+    rating: 2,
+    comment: 'Menunggu jadwal commissioning teknisi (ulasan belum dipublikasikan untuk moderasi).',
+    isPublished: false,
   },
 ];
 
@@ -32,6 +59,7 @@ async function ensureReviewAndSyncRating(
     readonly userId: string;
     readonly rating: number;
     readonly comment: string;
+    readonly isPublished: boolean;
   },
 ): Promise<void> {
   await database.transaction(async (tx) => {
@@ -43,6 +71,7 @@ async function ensureReviewAndSyncRating(
           eq(productReviews.productId, input.productId),
           eq(productReviews.userId, input.userId),
           isNull(productReviews.orderId),
+          isNull(productReviews.deletedAt),
         ),
       )
       .limit(1);
@@ -55,7 +84,8 @@ async function ensureReviewAndSyncRating(
         orderId: null,
         rating: input.rating,
         comment: input.comment,
-        isPublished: true,
+        isPublished: input.isPublished,
+        isActive: true,
       });
     }
 
@@ -66,7 +96,12 @@ async function ensureReviewAndSyncRating(
       })
       .from(productReviews)
       .where(
-        and(eq(productReviews.productId, input.productId), eq(productReviews.isPublished, true)),
+        and(
+          eq(productReviews.productId, input.productId),
+          eq(productReviews.isPublished, true),
+          eq(productReviews.isActive, true),
+          isNull(productReviews.deletedAt),
+        ),
       );
 
     await tx
@@ -81,21 +116,24 @@ async function ensureReviewAndSyncRating(
 }
 
 /**
- * Seeds published customer reviews and transactionally updates `products.rating_avg` & `review_count`.
+ * Seeds published and pending-moderation customer reviews and transactionally updates
+ * `products.rating_avg` & `review_count` using only active, published reviews.
  */
 export async function seedReviews(
   database: Database,
-  reviewerId: string,
+  reviewers: { readonly primary: string; readonly secondary: string },
   productIdsByKey: ReadonlyMap<string, string>,
 ): Promise<SeededReviewsResult> {
   for (const review of REVIEW_SPECS) {
     const prodId = productIdsByKey.get(review.productKey);
     if (prodId !== undefined) {
+      const userId = review.authorSlot === 'primary' ? reviewers.primary : reviewers.secondary;
       await ensureReviewAndSyncRating(database, {
         productId: prodId,
-        userId: reviewerId,
+        userId,
         rating: review.rating,
         comment: review.comment,
+        isPublished: review.isPublished,
       });
     }
   }

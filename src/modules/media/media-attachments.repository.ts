@@ -26,15 +26,17 @@ export async function syncMediaReferences(
   ownerType: MediaOwner,
   row: { id: string; deletedAt: Date | null },
 ): Promise<void> {
+  // Never wipe media_references when SUPABASE_URL is absent (e.g. non-storage test/dev env).
+  if (env.SUPABASE_URL === undefined) {
+    return;
+  }
   const existing = await tx
     .select({ id: mediaReferences.uploadId })
     .from(mediaReferences)
     .where(and(eq(mediaReferences.ownerType, ownerType), eq(mediaReferences.ownerId, row.id)));
   const existingIds = new Set(existing.map((r) => r.id));
-  const paths =
-    row.deletedAt !== null || env.SUPABASE_URL === undefined
-      ? []
-      : [...extractReferencedObjectPaths(collectMediaStrings(row))];
+  // Soft-deleted records are restorable, so retain their referenced images to prevent orphan-sweep loss.
+  const paths = [...extractReferencedObjectPaths(collectMediaStrings(row))];
   const uploads =
     paths.length === 0
       ? []
@@ -60,6 +62,10 @@ export async function syncMediaReferences(
       'Complete and verify each media upload before attaching it',
       'MEDIA_NOT_VERIFIED',
     );
+  }
+  const nextIds = new Set(uploads.map((u) => u.id));
+  if (existingIds.size === nextIds.size && [...nextIds].every((id) => existingIds.has(id))) {
+    return;
   }
   await tx
     .delete(mediaReferences)

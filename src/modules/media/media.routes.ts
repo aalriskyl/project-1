@@ -150,7 +150,8 @@ export function createAdminMediaRoutes(
     })
     .openapi(cleanupOrphansRoute, async (c) => {
       const actor = getRequiredAdmin(c);
-      const body = c.req.valid('json') ?? { olderThanHours: 24, limit: 100 };
+      const rawBody = c.req.valid('json');
+      const body = CleanupOrphansBodySchema.parse(rawBody ?? {});
       const data = await mediaService.cleanupOrphans(actor, body);
       return c.json(ok(data, 'Orphaned media cleanup completed'), 200);
     });

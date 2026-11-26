@@ -19,6 +19,21 @@ function buildCacheControlDirective(options: PublicCacheOptions): string {
   return directives.join(', ');
 }
 
+function stripWeakPrefix(tag: string): string {
+  return tag.startsWith('W/') ? tag.slice(2) : tag;
+}
+
+function matchesIfNoneMatch(headerValue: string, etag: string): boolean {
+  const trimmed = headerValue.trim();
+  if (trimmed === '*') {
+    return true;
+  }
+  const normalizedTarget = stripWeakPrefix(etag);
+  return trimmed
+    .split(',')
+    .some((candidate) => stripWeakPrefix(candidate.trim()) === normalizedTarget);
+}
+
 /**
  * Sets `Cache-Control` and weak `ETag` headers on successful GET/HEAD responses,
  * returning `304 Not Modified` when `If-None-Match` matches.
@@ -42,7 +57,7 @@ export function publicCache(options: PublicCacheOptions) {
     c.res.headers.set('ETag', etag);
 
     const ifNoneMatch = c.req.header('if-none-match');
-    if (ifNoneMatch !== undefined && ifNoneMatch === etag) {
+    if (ifNoneMatch !== undefined && matchesIfNoneMatch(ifNoneMatch, etag)) {
       const headers = new Headers(c.res.headers);
       headers.delete('Content-Length');
       c.res = new Response(null, {

@@ -117,7 +117,11 @@ export async function seedDatabase(
 
   const reviewsResult =
     selected.has('reviews') && usersResult !== null && productsResult !== null
-      ? await seedReviews(database, usersResult.reviewerId, productsResult.idsByKey)
+      ? await seedReviews(
+          database,
+          { primary: usersResult.reviewerId, secondary: usersResult.customerId },
+          productsResult.idsByKey,
+        )
       : null;
 
   return {

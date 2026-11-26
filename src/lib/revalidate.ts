@@ -1,4 +1,5 @@
 import { env } from '@/config/env.ts';
+import { type ResponseCache, responseCache } from '@/lib/cache.ts';
 import { logger } from '@/lib/logger.ts';
 
 export interface RevalidateNotifier {
@@ -57,4 +58,27 @@ export function createNextJsRevalidateNotifier(
   };
 }
 
-export const revalidateNotifier: RevalidateNotifier = createNextJsRevalidateNotifier();
+export function createCompositeRevalidateNotifier(
+  notifiers: readonly RevalidateNotifier[],
+): RevalidateNotifier {
+  return {
+    notify(tags: readonly string[]): void {
+      for (const notifier of notifiers) {
+        notifier.notify(tags);
+      }
+    },
+  };
+}
+
+export function createCacheInvalidatingNotifier(cache: ResponseCache): RevalidateNotifier {
+  return {
+    notify(tags: readonly string[]): void {
+      void cache.invalidateTags(tags);
+    },
+  };
+}
+
+export const revalidateNotifier: RevalidateNotifier = createCompositeRevalidateNotifier([
+  createCacheInvalidatingNotifier(responseCache),
+  createNextJsRevalidateNotifier(),
+]);

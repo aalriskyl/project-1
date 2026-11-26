@@ -95,6 +95,7 @@ export function createAuthService(
         id: user.id,
         email: user.email,
         role: user.role,
+        tokenVersion: user.tokenVersion,
       },
       options.jwtConfig,
     );
@@ -297,6 +298,16 @@ export function createAuthService(
 
     async resetPassword(input: ResetPasswordBody): Promise<void> {
       const tokenHash = hashTokenSha256(input.token);
+      const now = new Date();
+      // Reject unknown/expired tokens BEFORE running 64 MiB Argon2id hashing.
+      const hasValidToken = await authRepo.hasActivePasswordResetToken(tokenHash, now);
+      if (!hasValidToken) {
+        throw new UnauthorizedError(
+          'Invalid or expired password reset token',
+          'INVALID_RESET_TOKEN',
+        );
+      }
+
       const passwordHash = await hashPassword(input.newPassword);
 
       const consumed = await authRepo.consumePasswordResetTokenAndUpdatePassword({

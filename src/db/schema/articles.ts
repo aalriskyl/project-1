@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   pgTable,
   text,
@@ -42,12 +43,20 @@ export const articles = pgTable(
       .default(sql`'{}'::uuid[]`),
     isPublished: boolean('is_published').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
-    publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
+    publishedAt: timestamp('published_at', { withTimezone: true, precision: 3, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, precision: 3, mode: 'date' }),
   },
   (table) => [
+    check(
+      'articles_published_at_present_chk',
+      sql`${table.isPublished} = false or ${table.publishedAt} is not null`,
+    ),
     uniqueIndex('articles_slug_active_uidx')
       .on(table.slug)
       .where(sql`${table.deletedAt} is null`),
@@ -59,6 +68,7 @@ export const articles = pgTable(
       .on(table.createdAt.desc(), table.id.desc())
       .where(sql`${table.deletedAt} is null`),
     index('articles_tags_gin_idx').using('gin', table.tags),
+    index('articles_related_product_ids_gin_idx').using('gin', table.relatedProductIds),
     index('articles_search_trgm_gin_idx').using(
       'gin',
       sql`(${table.title} || ' ' || ${table.slug} || ' ' || coalesce(${table.excerpt}, '')) extensions.gin_trgm_ops`,

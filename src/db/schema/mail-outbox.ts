@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 export const mailOutbox = pgTable(
@@ -15,7 +16,11 @@ export const mailOutbox = pgTable(
     leaseId: uuid('lease_id'),
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'date' }),
   },
-  (t) => [index('mail_outbox_pending_idx').on(t.finishedAt, t.nextAttemptAt)],
+  (t) => [
+    index('mail_outbox_pending_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.finishedAt} is null`),
+  ],
 ).enableRLS();
 
 export type MailOutboxRow = typeof mailOutbox.$inferSelect;

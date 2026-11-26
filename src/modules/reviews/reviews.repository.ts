@@ -10,7 +10,7 @@ import {
   buildStatusFilterConditions,
   isUniqueViolation,
 } from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
+import { ConflictError, NotFoundError } from '@/lib/errors.ts';
 import { buildFuzzySearchCondition } from '@/lib/search.ts';
 import type {
   AdminDateListFilter,
@@ -279,11 +279,19 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
     ): Promise<ProductReviewWithAuthorRow> {
       try {
         return await db.transaction(async (tx) => {
-          await tx
-            .select({ id: products.id })
+          const [productRow] = await tx
+            .select({
+              id: products.id,
+              isActive: products.isActive,
+              deletedAt: products.deletedAt,
+            })
             .from(products)
             .where(eq(products.id, input.productId))
             .for('update');
+          if (productRow === undefined || !productRow.isActive || productRow.deletedAt !== null) {
+            throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+          }
+
           await tx.insert(productReviews).values({
             id: input.id,
             productId: input.productId,
@@ -327,11 +335,18 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
       comment,
     }): Promise<ProductReviewWithAuthorRow | null> {
       return db.transaction(async (tx) => {
-        await tx
-          .select({ id: products.id })
+        const [productRow] = await tx
+          .select({
+            id: products.id,
+            isActive: products.isActive,
+            deletedAt: products.deletedAt,
+          })
           .from(products)
           .where(eq(products.id, productId))
           .for('update');
+        if (productRow === undefined || !productRow.isActive || productRow.deletedAt !== null) {
+          throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+        }
 
         const [updated] = await tx
           .update(productReviews)
@@ -344,6 +359,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
             and(
               eq(productReviews.productId, productId),
               eq(productReviews.userId, userId),
+              isNull(productReviews.orderId),
               eq(productReviews.isActive, true),
               isNull(productReviews.deletedAt),
             ),
@@ -369,11 +385,18 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
 
     async softDeleteOwnReviewAndSyncRating({ productId, userId }): Promise<boolean> {
       return db.transaction(async (tx) => {
-        await tx
-          .select({ id: products.id })
+        const [productRow] = await tx
+          .select({
+            id: products.id,
+            isActive: products.isActive,
+            deletedAt: products.deletedAt,
+          })
           .from(products)
           .where(eq(products.id, productId))
           .for('update');
+        if (productRow === undefined || !productRow.isActive || productRow.deletedAt !== null) {
+          throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+        }
 
         const now = new Date();
         const [softDeleted] = await tx
@@ -388,6 +411,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
             and(
               eq(productReviews.productId, productId),
               eq(productReviews.userId, userId),
+              isNull(productReviews.orderId),
               eq(productReviews.isActive, true),
               isNull(productReviews.deletedAt),
             ),
@@ -412,75 +436,103 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           ? { isPublished: patchOrIsPublished }
           : patchOrIsPublished;
 
-      return db.transaction(async (tx) => {
-        const [target] = await tx
-          .select({ productId: productReviews.productId, deletedAt: productReviews.deletedAt })
-          .from(productReviews)
-          .where(eq(productReviews.id, reviewId));
-        if (target === undefined) return null;
-        await tx
-          .select({ id: products.id })
-          .from(products)
-          .where(eq(products.id, target.productId))
-          .for('update');
+      try {
+        return await db.transaction(async (tx) => {
+          const [initial] = await tx
+            .select({ productId: productReviews.productId })
+            .from(productReviews)
+            .where(eq(productReviews.id, reviewId));
+          if (initial === undefined) return null;
+          await tx
+            .select({ id: products.id })
+            .from(products)
+            .where(eq(products.id, initial.productId))
+            .for('update');
 
-        const now = new Date();
-        const setPayload: {
-          isPublished?: boolean;
-          isActive?: boolean;
-          deletedAt?: Date | null;
-          updatedAt: Date;
-        } = {
-          updatedAt: now,
-          ...(patch.isPublished !== undefined ? { isPublished: patch.isPublished } : {}),
-          ...(patch.isActive !== undefined
-            ? {
-                isActive: patch.isActive,
-                deletedAt:
-                  patch.deletedAt !== undefined
-                    ? patch.deletedAt
-                    : patch.isActive
-                      ? null
-                      : (target.deletedAt ?? now),
-              }
-            : {}),
-        };
+          const [target] = await tx
+            .select({
+              productId: productReviews.productId,
+              deletedAt: productReviews.deletedAt,
+            })
+            .from(productReviews)
+            .where(eq(productReviews.id, reviewId));
+          if (target === undefined) return null;
 
-        const [updated] = await tx
-          .update(productReviews)
-          .set(setPayload)
-          .where(eq(productReviews.id, reviewId))
-          .returning({ id: productReviews.id, productId: productReviews.productId });
+          const now = new Date();
+          const setPayload: {
+            isPublished?: boolean;
+            isActive?: boolean;
+            deletedAt?: Date | null;
+            updatedAt: Date;
+          } = {
+            updatedAt: now,
+            ...(patch.isPublished !== undefined ? { isPublished: patch.isPublished } : {}),
+            ...(patch.isActive !== undefined
+              ? {
+                  isActive: patch.isActive,
+                  ...(patch.isActive === false && patch.isPublished === undefined
+                    ? { isPublished: false }
+                    : {}),
+                  deletedAt:
+                    patch.deletedAt !== undefined
+                      ? patch.deletedAt
+                      : patch.isActive
+                        ? null
+                        : (target.deletedAt ?? now),
+                }
+              : {}),
+          };
 
-        if (updated === undefined) {
-          return null;
+          const [updated] = await tx
+            .update(productReviews)
+            .set(setPayload)
+            .where(eq(productReviews.id, reviewId))
+            .returning({ id: productReviews.id, productId: productReviews.productId });
+
+          if (updated === undefined) {
+            return null;
+          }
+
+          await recomputeProductRatingTx(tx, updated.productId);
+
+          const [withAuthor] = await tx
+            .select(selectShape)
+            .from(productReviews)
+            .innerJoin(users, eq(productReviews.userId, users.id))
+            .where(eq(productReviews.id, reviewId))
+            .limit(1);
+
+          return withAuthor ?? null;
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new ConflictError(
+            'An active review by this user already exists for this product',
+            'REVIEW_ALREADY_EXISTS',
+          );
         }
-
-        await recomputeProductRatingTx(tx, updated.productId);
-
-        const [withAuthor] = await tx
-          .select(selectShape)
-          .from(productReviews)
-          .innerJoin(users, eq(productReviews.userId, users.id))
-          .where(eq(productReviews.id, reviewId))
-          .limit(1);
-
-        return withAuthor ?? null;
-      });
+        throw err;
+      }
     },
 
     async deleteAndSyncRating(reviewId: string): Promise<{ readonly productId: string } | null> {
       return db.transaction(async (tx) => {
+        const [initial] = await tx
+          .select({ productId: productReviews.productId })
+          .from(productReviews)
+          .where(eq(productReviews.id, reviewId));
+        if (initial === undefined) return null;
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, initial.productId))
+          .for('update');
+
         const [target] = await tx
           .select({ productId: productReviews.productId, deletedAt: productReviews.deletedAt })
           .from(productReviews)
           .where(eq(productReviews.id, reviewId));
         if (target === undefined) return null;
-        await tx
-          .select({ id: products.id })
-          .from(products)
-          .where(eq(products.id, target.productId))
-          .for('update');
 
         const now = new Date();
         const [softDeleted] = await tx

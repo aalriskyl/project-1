@@ -425,7 +425,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       const deleted = await withMediaMutation(db, 'articles', async (tx) => {
         const [row] = await tx
           .update(articles)
-          .set({ isActive: false, deletedAt, updatedAt: deletedAt })
+          .set({ isActive: false, deletedAt, updatedAt: new Date() })
           .where(eq(articles.id, id))
           .returning();
         return row ?? null;

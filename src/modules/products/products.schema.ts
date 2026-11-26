@@ -25,7 +25,12 @@ export type ProductType = (typeof PRODUCT_TYPES)[number];
 
 export const ProductTypeSchema = z.enum(PRODUCT_TYPES);
 
-const ProductSlugSchema = createSlugSchema(280);
+const RESERVED_PRODUCT_SLUGS = new Set(['compare', 'recommendations']);
+
+const ProductSlugSchema = createSlugSchema(280).refine(
+  (slug) => !RESERVED_PRODUCT_SLUGS.has(slug),
+  'This slug is reserved by the API',
+);
 
 const BrandSlugSchema = createSlugSchema(64, 'Brand slug must be lowercase kebab-case');
 
@@ -80,6 +85,9 @@ export const ProductSpecsSchema = z
     z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, 'Spec keys must be snake_case'),
     ProductSpecPrimitiveSchema,
   )
+  .refine((obj) => Object.keys(obj).length <= 50, {
+    message: 'specs can contain at most 50 keys',
+  })
   .openapi('ProductSpecs');
 
 export type ProductSpecs = z.infer<typeof ProductSpecsSchema>;

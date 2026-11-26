@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
+import { passwordResetTokens } from '@/db/schema/password-reset-tokens.ts';
 import { refreshTokens } from '@/db/schema/refresh-tokens.ts';
 import { users } from '@/db/schema/users.ts';
 import {
@@ -26,6 +27,7 @@ export interface UserEntity extends SoftDeletableEntity {
   readonly address: string | null;
   readonly displayName: string;
   readonly role: UserRole;
+  readonly tokenVersion: number;
 }
 
 export interface UserWithCredentials extends UserEntity {
@@ -81,6 +83,7 @@ function toUserEntity(row: {
   address: string | null;
   displayName: string;
   role: string;
+  tokenVersion: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -93,6 +96,7 @@ function toUserEntity(row: {
     address: row.address,
     displayName: row.displayName,
     role: normalizeRole(row.role),
+    tokenVersion: row.tokenVersion,
     isActive: row.isActive,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -110,6 +114,7 @@ export function createUsersRepository(db: Database): UsersRepository {
     address: users.address,
     displayName: users.displayName,
     role: users.role,
+    tokenVersion: users.tokenVersion,
     isActive: users.isActive,
     createdAt: users.createdAt,
     updatedAt: users.updatedAt,
@@ -211,16 +216,38 @@ export function createUsersRepository(db: Database): UsersRepository {
     async adminUpdateById(id, patch, now): Promise<UserEntity | null> {
       try {
         return await db.transaction(async (tx) => {
+          if (patch.isActive === false || patch.role === 'user') {
+            const activeAdmins = await tx
+              .select({ id: users.id })
+              .from(users)
+              .where(
+                and(eq(users.role, 'admin'), eq(users.isActive, true), isNull(users.deletedAt)),
+              )
+              .for('update');
+            if (activeAdmins.length <= 1 && activeAdmins.some((admin) => admin.id === id)) {
+              throw new ConflictError(
+                'Cannot deactivate or demote the last active admin',
+                'LAST_ADMIN_REQUIRED',
+              );
+            }
+          }
+
+          const shouldRevoke =
+            patch.isActive === false || patch.role !== undefined || patch.email !== undefined;
+
           const [updated] = await tx
             .update(users)
             .set({
               ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
-              ...(patch.email !== undefined ? { email: patch.email.trim().toLowerCase() } : {}),
+              ...(patch.email !== undefined
+                ? { email: patch.email.trim().toLowerCase(), googleSub: null }
+                : {}),
               ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
               ...(patch.address !== undefined ? { address: patch.address } : {}),
               ...(patch.role !== undefined ? { role: patch.role } : {}),
               ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
               ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt } : {}),
+              ...(shouldRevoke ? { tokenVersion: sql`${users.tokenVersion} + 1` } : {}),
               updatedAt: now,
             })
             .where(eq(users.id, id))
@@ -230,11 +257,15 @@ export function createUsersRepository(db: Database): UsersRepository {
             return null;
           }
 
-          if (patch.isActive === false || patch.role !== undefined) {
+          if (shouldRevoke) {
             await tx
               .update(refreshTokens)
               .set({ revokedAt: now })
               .where(and(eq(refreshTokens.userId, id), isNull(refreshTokens.revokedAt)));
+            await tx
+              .update(passwordResetTokens)
+              .set({ usedAt: now })
+              .where(and(eq(passwordResetTokens.userId, id), isNull(passwordResetTokens.usedAt)));
           }
 
           return toUserEntity(updated);

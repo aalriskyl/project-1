@@ -32,24 +32,29 @@ export const productReviews = pgTable(
     comment: text('comment'),
     isPublished: boolean('is_published').notNull().default(true),
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
-    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, precision: 3, mode: 'date' }),
   },
   (table) => [
     check('product_reviews_rating_range_chk', sql`${table.rating} >= 1 and ${table.rating} <= 5`),
     uniqueIndex('product_reviews_user_product_no_order_uidx')
       .on(table.userId, table.productId)
-      .where(sql`${table.orderId} is null`),
+      .where(sql`${table.orderId} is null and ${table.deletedAt} is null`),
     uniqueIndex('product_reviews_order_product_uidx')
       .on(table.orderId, table.productId)
-      .where(sql`${table.orderId} is not null`),
+      .where(sql`${table.orderId} is not null and ${table.deletedAt} is null`),
     index('product_reviews_product_pub_created_idx').on(
       table.productId,
       table.isPublished,
       table.createdAt.desc(),
       table.id.desc(),
     ),
+    index('product_reviews_created_id_idx').on(table.createdAt.desc(), table.id.desc()),
     index('product_reviews_user_id_idx').on(table.userId),
   ],
 ).enableRLS();

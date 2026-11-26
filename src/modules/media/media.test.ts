@@ -65,6 +65,20 @@ describe('Asset URL policy & Media orphan sweep (/v1/admin/media/*)', () => {
 
   test('tracks uploads, rejects untrusted external image URLs on save, and sweeps only unreferenced orphans >24h old (preserving inline Markdown images)', async () => {
     const store = createInMemoryDatastore();
+    store.seedUser({
+      id: adminActor.id,
+      email: adminActor.email,
+      passwordHash: 'hash',
+      displayName: 'Media Admin',
+      role: 'admin',
+    });
+    store.seedUser({
+      id: userActor.id,
+      email: userActor.email,
+      passwordHash: 'hash',
+      displayName: 'Media User',
+      role: 'user',
+    });
     const adminToken = (await signAccessToken(adminActor)).token;
     const userToken = (await signAccessToken(userActor)).token;
     const deletedFromStorage: string[] = [];
@@ -265,6 +279,15 @@ describe('Asset URL policy & Media orphan sweep (/v1/admin/media/*)', () => {
     expect(sweep.deletedCount).toBe(1);
     expect(sweep.deletedPaths).toEqual([orphanPath]);
     expect(deletedFromStorage).toEqual([orphanPath]);
+
+    // Regression C4: bodyless cleanup-orphans request uses schema defaults and returns 200 (never 500)
+    const bodylessSweepRes = await testApp.request('/v1/admin/media/cleanup-orphans', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(bodylessSweepRes.status).toBe(200);
+    const bodylessSweep = CleanupOrphansEnvelopeSchema.parse(await bodylessSweepRes.json()).data;
+    expect(bodylessSweep.deletedCount).toBe(0);
 
     // Unconfigured Storage returns 503 cleanly
     const unconfiguredApp = createApp({

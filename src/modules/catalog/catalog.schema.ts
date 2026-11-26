@@ -117,6 +117,10 @@ export const ListCategoriesQuerySchema = z
   .refine((q) => !(q.parentId !== undefined && q.rootOnly === true), {
     path: ['parentId'],
     message: 'Cannot combine parentId with rootOnly=true',
+  })
+  .refine((q) => !(q.tree === true && (q.parentId !== undefined || q.rootOnly === false)), {
+    path: ['tree'],
+    message: 'Cannot combine tree=true with parentId or rootOnly=false',
   });
 
 export type ListCategoriesQuery = z.infer<typeof ListCategoriesQuerySchema>;

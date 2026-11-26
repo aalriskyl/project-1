@@ -61,6 +61,13 @@ describe('Application core invariants', () => {
     expect(spec.paths['/v1/users/me']).toBeDefined();
     expect(spec.components.securitySchemes['BearerAuth']).toBeDefined();
 
+    // Compresses large JSON responses when client advertises gzip
+    const gzippedOpenApiRes = await testApp.request('/v1/openapi.json', {
+      headers: { 'Accept-Encoding': 'gzip' },
+    });
+    expect(gzippedOpenApiRes.status).toBe(200);
+    expect(gzippedOpenApiRes.headers.get('Content-Encoding')).toBe('gzip');
+
     const notFoundRes = await testApp.request('/v1/does-not-exist');
     expect(notFoundRes.status).toBe(404);
     const notFoundBody = ErrorResponseSchema.parse(await notFoundRes.json());

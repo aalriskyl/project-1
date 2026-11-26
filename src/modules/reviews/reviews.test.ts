@@ -275,5 +275,18 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
         })
       ).status,
     ).toBe(404);
+
+    // Regression C3: after soft-deleting own review, customer can submit a fresh review for the same product
+    const reReviewRes = await testApp.request(`/v1/products/${prod.id}/reviews`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${buyer1Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: 4, comment: 'Second purchase worked much better.' }),
+    });
+    expect(reReviewRes.status).toBe(201);
+    const prodAfterReReview = ProductDetailEnvelopeSchema.parse(
+      await (await testApp.request(`/v1/products/${prod.slug}`)).json(),
+    ).data;
+    expect(prodAfterReReview.ratingAvg).toBe(4);
+    expect(prodAfterReReview.reviewCount).toBe(1);
   });
 });

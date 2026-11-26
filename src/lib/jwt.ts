@@ -6,11 +6,13 @@ import { generateId } from '@/lib/id.ts';
 import { type AuthUser, USER_ROLES } from '@/types/app.ts';
 
 const PINNED_JWT_ALGORITHM = 'HS256' as const;
+const MAX_CLOCK_SKEW_SEC = 5;
 
 const AccessTokenClaimsSchema = z.object({
   sub: z.uuid(),
   email: z.email(),
   role: z.enum(USER_ROLES),
+  tv: z.number().int().positive().default(1),
   iss: z.string(),
   aud: z.string(),
   iat: z.number(),
@@ -49,6 +51,7 @@ export async function signAccessToken(
       sub: user.id,
       email: user.email,
       role: user.role,
+      tv: user.tokenVersion ?? 1,
       iss: config.issuer,
       aud: config.audience,
       iat: nowSec,
@@ -76,7 +79,7 @@ export async function verifyAccessToken(
       iss: config.issuer,
       aud: config.audience,
       exp: true,
-      iat: true,
+      iat: false,
     });
   } catch {
     throw new UnauthorizedError('Invalid or expired access token', 'INVALID_TOKEN');
@@ -87,9 +90,15 @@ export async function verifyAccessToken(
     throw new UnauthorizedError('Malformed access token claims', 'INVALID_TOKEN');
   }
 
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (parsed.data.iat > nowSec + MAX_CLOCK_SKEW_SEC) {
+    throw new UnauthorizedError('Invalid or expired access token', 'INVALID_TOKEN');
+  }
+
   return {
     id: parsed.data.sub,
     email: parsed.data.email,
     role: parsed.data.role,
+    tokenVersion: parsed.data.tv,
   };
 }

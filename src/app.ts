@@ -1,13 +1,22 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { compress } from 'hono/compress';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { timeout } from 'hono/timeout';
 import { env } from '@/config/env.ts';
 import { checkDbReadiness, db } from '@/db/client.ts';
+import { type ResponseCache, responseCache } from '@/lib/cache.ts';
 import { defaultOpenApiHook, ErrorResponseSchema, ServiceUnavailableError } from '@/lib/errors.ts';
+import { checkRedisReadiness } from '@/lib/redis.ts';
 import { createSuccessEnvelopeSchema, ok } from '@/lib/response.ts';
+import {
+  createCacheInvalidatingNotifier,
+  createCompositeRevalidateNotifier,
+  createNextJsRevalidateNotifier,
+} from '@/lib/revalidate.ts';
+import { createAuthMiddleware } from '@/middlewares/auth.ts';
 import { errorHandler, notFoundHandler } from '@/middlewares/error-handler.ts';
 import { requestLoggerMiddleware } from '@/middlewares/logger.ts';
 import { createRateLimiter, type RateLimitStore } from '@/middlewares/rate-limit.ts';
@@ -84,6 +93,7 @@ export interface AppDependencies {
   readonly mediaService?: MediaService;
   readonly authMiddleware?: MiddlewareHandler<AppEnv>;
   readonly checkReadiness?: () => Promise<boolean>;
+  readonly responseCache?: ResponseCache;
   readonly rateLimitStore?: RateLimitStore;
   readonly globalRateLimitMax?: number;
   readonly authRateLimitMax?: number;
@@ -96,20 +106,39 @@ export function createApp(deps: AppDependencies = {}) {
 
   const catalogRepo = createCatalogRepository(db);
   const productsRepo = createProductsRepository(db);
+  const activeCache = deps.responseCache ?? responseCache;
+  const activeRevalidator = createCompositeRevalidateNotifier([
+    createCacheInvalidatingNotifier(activeCache),
+    createNextJsRevalidateNotifier(),
+  ]);
 
   const authService = deps.authService ?? createAuthService(createAuthRepository(db));
   const usersService = deps.usersService ?? createUsersService(createUsersRepository(db));
-  const catalogService = deps.catalogService ?? createCatalogService(catalogRepo);
-  const productsService = deps.productsService ?? createProductsService(productsRepo, catalogRepo);
+  const catalogService =
+    deps.catalogService ?? createCatalogService(catalogRepo, activeRevalidator, activeCache);
+  const productsService =
+    deps.productsService ?? createProductsService(productsRepo, catalogRepo, activeRevalidator);
   const reviewsService =
-    deps.reviewsService ?? createReviewsService(createReviewsRepository(db), productsRepo);
+    deps.reviewsService ??
+    createReviewsService(createReviewsRepository(db), productsRepo, activeRevalidator);
   const articlesService =
     deps.articlesService ??
     createArticlesService(createArticlesRepository(db), {
+      revalidator: activeRevalidator,
       resolveRelatedProducts: (ids) => productsService.resolveRelatedProductCards(ids),
     });
   const mediaService = deps.mediaService ?? createMediaService(createMediaRepository(db));
-  const checkReadiness = deps.checkReadiness ?? (() => checkDbReadiness(db));
+  const authMiddleware =
+    deps.authMiddleware ??
+    createAuthMiddleware({
+      resolveSessionUser: (userId) => usersService.resolveAuthUser(userId),
+    });
+  const checkReadiness =
+    deps.checkReadiness ??
+    (async () => {
+      const [dbOk, redisOk] = await Promise.all([checkDbReadiness(db), checkRedisReadiness()]);
+      return dbOk && redisOk;
+    });
   const windowMs = deps.rateLimitWindowMs ?? env.RATE_LIMIT_WINDOW_MS;
   const rateLimitStore = deps.rateLimitStore ?? redisRateLimitStore;
 
@@ -130,12 +159,19 @@ export function createApp(deps: AppDependencies = {}) {
   application.use('*', requestIdMiddleware);
   application.use('*', requestLoggerMiddleware);
   application.use('*', secureHeaders());
+  application.use('*', compress());
   application.use(
     '*',
     cors({
       origin: (origin) => (env.CORS_ORIGINS.includes(origin) ? origin : null),
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Request-Id',
+        'Idempotency-Key',
+        'If-None-Match',
+      ],
       exposeHeaders: [
         'X-Request-Id',
         'ETag',
@@ -183,8 +219,11 @@ export function createApp(deps: AppDependencies = {}) {
     mediaService,
     globalRateLimiter,
     authRateLimiter,
-    ...(deps.authMiddleware !== undefined ? { authMiddleware: deps.authMiddleware } : {}),
+    authMiddleware,
   });
+
+  application.use('/ready', globalRateLimiter);
+  application.use('/v1/openapi.json', globalRateLimiter);
 
   const routes = application
     .openapi(healthRoute, (c) =>
@@ -202,7 +241,10 @@ export function createApp(deps: AppDependencies = {}) {
     .openapi(readyRoute, async (c) => {
       const ready = await checkReadiness();
       if (!ready) {
-        throw new ServiceUnavailableError('Database is unreachable', 'DB_UNAVAILABLE');
+        throw new ServiceUnavailableError(
+          'Service dependency (database or cache) is unreachable',
+          'SERVICE_UNAVAILABLE',
+        );
       }
       return c.json(
         ok(

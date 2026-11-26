@@ -82,22 +82,44 @@ export function createArticlesService(
   } = {},
 ): ArticlesService {
   const revalidator = options.revalidator ?? revalidateNotifier;
+  const hasRelatedProductsResolver = options.resolveRelatedProducts !== undefined;
   const resolveRelatedProducts = options.resolveRelatedProducts ?? emptyRelatedProductsResolver;
+
+  async function validateRelatedProductIds(productIds: readonly string[]): Promise<void> {
+    if (!hasRelatedProductsResolver || productIds.length === 0) {
+      return;
+    }
+    const uniqueIds = [...new Set(productIds)];
+    const resolved = await resolveRelatedProducts(uniqueIds);
+    if (resolved.length !== uniqueIds.length) {
+      throw new NotFoundError(
+        'One or more related products were not found or are inactive',
+        'PRODUCT_NOT_FOUND',
+      );
+    }
+  }
 
   async function serializeArticleDetail(
     row: ArticleRow,
-    relatedArticles?: readonly ArticleSummaryRow[],
+    options?: {
+      readonly relatedArticles?: readonly ArticleSummaryRow[];
+      readonly filterPublicRelatedIds?: boolean;
+    },
   ): Promise<ArticleDetail> {
     const relatedProducts =
       row.relatedProductIds.length > 0 ? await resolveRelatedProducts(row.relatedProductIds) : [];
+    const relatedProductIds =
+      options?.filterPublicRelatedIds === true && hasRelatedProductsResolver
+        ? relatedProducts.map((product) => product.id)
+        : [...row.relatedProductIds];
 
     return {
       ...serializeArticleSummary(row),
       contentMd: row.contentMd,
-      relatedProductIds: [...row.relatedProductIds],
+      relatedProductIds,
       relatedProducts: [...relatedProducts],
-      ...(relatedArticles !== undefined
-        ? { relatedArticles: relatedArticles.map(serializeArticleSummary) }
+      ...(options?.relatedArticles !== undefined
+        ? { relatedArticles: options.relatedArticles.map(serializeArticleSummary) }
         : {}),
     };
   }
@@ -136,7 +158,10 @@ export function createArticlesService(
             })
           : undefined;
 
-      return serializeArticleDetail(article, relatedArticles);
+      return serializeArticleDetail(article, {
+        ...(relatedArticles !== undefined ? { relatedArticles } : {}),
+        filterPublicRelatedIds: true,
+      });
     },
 
     async listAdminArticles(
@@ -182,6 +207,7 @@ export function createArticlesService(
 
     async createArticle(actor: AuthUser, input: CreateArticleBody): Promise<ArticleDetail> {
       assertAdminUser(actor);
+      await validateRelatedProductIds(input.relatedProductIds);
 
       const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.title, 260);
@@ -226,6 +252,10 @@ export function createArticlesService(
       const existing = await articlesRepo.findById(id);
       if (existing === null) {
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
+      }
+
+      if (input.relatedProductIds !== undefined) {
+        await validateRelatedProductIds(input.relatedProductIds);
       }
 
       const nextActive = resolveActiveStateInput(input);

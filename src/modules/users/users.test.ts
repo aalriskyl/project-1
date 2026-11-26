@@ -395,12 +395,66 @@ describe('Users HTTP routes (/v1/users)', () => {
     expect(restoredUser.status).toBe('active');
     expect(restoredUser.deletedAt).toBeNull();
 
+    // Regression C1: token issued before deactivation stays revoked (401) even after restore
     expect(
       (
         await testApp.request('/v1/users/me', {
           headers: { Authorization: `Bearer ${user1Token}` },
         })
       ).status,
+    ).toBe(401);
+
+    // Fresh token matching current tokenVersion succeeds on /v1/users/me
+    const freshUser1Token = (
+      await signAccessToken({
+        id: user1.id,
+        email: user1.email,
+        role: 'user',
+        tokenVersion: 2,
+      })
+    ).token;
+    expect(
+      (
+        await testApp.request('/v1/users/me', {
+          headers: { Authorization: `Bearer ${freshUser1Token}` },
+        })
+      ).status,
     ).toBe(200);
+
+    // Regression H1 & C1: demote extra admins cleanly; cannot demote/deactivate the last active admin (409)
+    const staffToken = (
+      await signAccessToken({
+        id: createdStaff.id,
+        email: createdStaff.email,
+        role: 'admin',
+        tokenVersion: 1,
+      })
+    ).token;
+    expect(
+      (
+        await testApp.request(`/v1/users/${user2.id}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user' }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await testApp.request(`/v1/users/${createdStaff.id}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user' }),
+        })
+      ).status,
+    ).toBe(200);
+    // Demoted admin's previously issued JWT is immediately rejected (401 TOKEN_REVOKED)
+    expect(
+      (
+        await testApp.request('/v1/users', {
+          headers: { Authorization: `Bearer ${staffToken}` },
+        })
+      ).status,
+    ).toBe(401);
   });
 });

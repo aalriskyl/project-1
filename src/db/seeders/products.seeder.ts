@@ -29,6 +29,7 @@ interface SeedProductSpec {
   readonly requiresQuote: boolean;
   readonly stock: number;
   readonly isFeatured: boolean;
+  readonly isActive?: boolean;
   readonly media: Omit<ProductMediaItemRow, 'id'>[];
   readonly specs: ProductSpecsMap;
   readonly customSpecs?: ProductCustomSpecRow[];
@@ -273,6 +274,86 @@ const PRODUCT_SPECS: readonly SeedProductSpec[] = [
     heightCm: '16.00',
     weightKg: '0.65',
   },
+  {
+    key: 'tcg150',
+    categoryKey: 'engine-cummins',
+    brandSlug: 'cummins',
+    name: 'Genset 150 kVA Silent Diesel Tsuzumi TCG150 Powered by Cummins',
+    slug: 'genset-150-kva-silent-diesel-tsuzumi-tcg150',
+    sku: 'TCG150-SILENT',
+    productType: 'equipment',
+    descriptionMd:
+      '## Keunggulan Tsuzumi TCG150\n\nGenset industri heavy-duty 150 kVA dengan mesin **Cummins 6CTA8.3-G2** (indent / pre-order saat stok kosong).',
+    metaTitle: 'Genset 150 kVA Silent Cummins Tsuzumi TCG150',
+    metaDescription:
+      'Genset silent 150 kVA engine Cummins 6CTA8.3-G2 untuk industri dan proyek besar.',
+    focusKeyword: 'genset 150 kva cummins',
+    canonicalUrl: null,
+    noIndex: false,
+    ogImageUrl: 'https://placehold.co/1200x630.webp',
+    priceIdr: 465_000_000,
+    requiresQuote: true,
+    stock: 0,
+    isFeatured: false,
+    media: [
+      {
+        type: 'image',
+        url: 'https://placehold.co/800x600.webp',
+        altText: 'Genset 150 kVA Silent Cummins Tsuzumi TCG150',
+      },
+    ],
+    specs: {
+      rated_power_kva: 150,
+      voltage: '220/380V',
+      silent_canopy: true,
+      fuel_type: 'Diesel',
+      engine_model: 'Cummins 6CTA8.3-G2',
+    },
+    lengthCm: '310.00',
+    widthCm: '115.00',
+    heightCm: '175.00',
+    weightKg: '2050.00',
+  },
+  {
+    key: 'tpg20-legacy',
+    categoryKey: 'engine-perkins',
+    brandSlug: 'perkins',
+    name: 'Genset 20 kVA Silent Diesel Tsuzumi TPG20 (Discontinued)',
+    slug: 'genset-20-kva-silent-diesel-tsuzumi-tpg20-legacy',
+    sku: 'TPG20-LEGACY',
+    productType: 'equipment',
+    descriptionMd:
+      'Model lama 20 kVA yang telah diarsipkan untuk referensi admin (`status=inactive`).',
+    metaTitle: 'Genset 20 kVA Tsuzumi TPG20 (Discontinued)',
+    metaDescription: 'Arsip spesifikasi genset 20 kVA Tsuzumi TPG20.',
+    focusKeyword: 'genset 20 kva tsuzumi',
+    canonicalUrl: null,
+    noIndex: true,
+    ogImageUrl: null,
+    priceIdr: 132_000_000,
+    requiresQuote: true,
+    stock: 0,
+    isFeatured: false,
+    isActive: false,
+    media: [
+      {
+        type: 'image',
+        url: 'https://placehold.co/800x600.webp',
+        altText: 'Genset 20 kVA Tsuzumi TPG20 Legacy',
+      },
+    ],
+    specs: {
+      rated_power_kva: 20,
+      voltage: '220/380V',
+      silent_canopy: true,
+      fuel_type: 'Diesel',
+      engine_model: 'Perkins 404D-22G',
+    },
+    lengthCm: '195.00',
+    widthCm: '90.00',
+    heightCm: '115.00',
+    weightKg: '740.00',
+  },
 ];
 
 const SPAREPART_LINKS: readonly {
@@ -291,10 +372,15 @@ async function ensureProduct(
   spec: SeedProductSpec,
   categoryId: string,
 ): Promise<string> {
+  const isActive = spec.isActive ?? true;
   const [existing] = await database
     .select({ id: products.id })
     .from(products)
-    .where(and(eq(products.slug, spec.slug), isNull(products.deletedAt)))
+    .where(
+      isActive
+        ? and(eq(products.slug, spec.slug), isNull(products.deletedAt))
+        : eq(products.slug, spec.slug),
+    )
     .limit(1);
 
   if (existing !== undefined) {
@@ -327,7 +413,8 @@ async function ensureProduct(
     requiresQuote: spec.requiresQuote,
     stock: spec.stock,
     isFeatured: spec.isFeatured,
-    isActive: true,
+    isActive,
+    deletedAt: isActive ? null : new Date('2026-01-15T00:00:00.000Z'),
     primaryImageUrl,
     media: mediaWithIds,
     specs: spec.specs,

@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { mailOutbox, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
 import { passwordResetTokens } from '@/db/schema/password-reset-tokens.ts';
@@ -77,6 +77,7 @@ export interface AuthRepository {
     input: NewPasswordResetTokenInput,
     delivery?: NewMailDelivery,
   ): Promise<void>;
+  hasActivePasswordResetToken(tokenHash: string, now: Date): Promise<boolean>;
   consumePasswordResetTokenAndUpdatePassword(params: {
     readonly tokenHash: string;
     readonly passwordHash: string;
@@ -102,6 +103,7 @@ export function createAuthRepository(db: Database): AuthRepository {
     displayName: users.displayName,
     role: users.role,
     isActive: users.isActive,
+    tokenVersion: users.tokenVersion,
     createdAt: users.createdAt,
     updatedAt: users.updatedAt,
     deletedAt: users.deletedAt,
@@ -131,6 +133,7 @@ export function createAuthRepository(db: Database): AuthRepository {
         displayName: row.displayName,
         role: normalizeRole(row.role),
         isActive: row.isActive,
+        tokenVersion: row.tokenVersion,
         passwordHash: row.passwordHash,
         googleSub: row.googleSub,
         createdAt: row.createdAt,
@@ -163,6 +166,7 @@ export function createAuthRepository(db: Database): AuthRepository {
         displayName: row.displayName,
         role: normalizeRole(row.role),
         isActive: row.isActive,
+        tokenVersion: row.tokenVersion,
         passwordHash: row.passwordHash,
         googleSub: row.googleSub,
         createdAt: row.createdAt,
@@ -190,6 +194,7 @@ export function createAuthRepository(db: Database): AuthRepository {
         displayName: row.displayName,
         role: normalizeRole(row.role),
         isActive: row.isActive,
+        tokenVersion: row.tokenVersion,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
         deletedAt: row.deletedAt,
@@ -233,6 +238,7 @@ export function createAuthRepository(db: Database): AuthRepository {
             displayName: created.displayName,
             role: normalizeRole(created.role),
             isActive: created.isActive,
+            tokenVersion: created.tokenVersion,
             createdAt: created.createdAt,
             updatedAt: created.updatedAt,
             deletedAt: created.deletedAt,
@@ -292,6 +298,7 @@ export function createAuthRepository(db: Database): AuthRepository {
             displayName: updated.displayName,
             role: normalizeRole(updated.role),
             isActive: updated.isActive,
+            tokenVersion: updated.tokenVersion,
             createdAt: updated.createdAt,
             updatedAt: updated.updatedAt,
             deletedAt: updated.deletedAt,
@@ -352,6 +359,7 @@ export function createAuthRepository(db: Database): AuthRepository {
           displayName: row.user.displayName,
           role: normalizeRole(row.user.role),
           isActive: row.user.isActive,
+          tokenVersion: row.user.tokenVersion,
           createdAt: row.user.createdAt,
           updatedAt: row.user.updatedAt,
           deletedAt: row.user.deletedAt,
@@ -415,6 +423,24 @@ export function createAuthRepository(db: Database): AuthRepository {
       });
     },
 
+    async hasActivePasswordResetToken(tokenHash: string, now: Date): Promise<boolean> {
+      const [row] = await db
+        .select({ id: passwordResetTokens.id })
+        .from(passwordResetTokens)
+        .innerJoin(users, eq(passwordResetTokens.userId, users.id))
+        .where(
+          and(
+            eq(passwordResetTokens.tokenHash, tokenHash),
+            isNull(passwordResetTokens.usedAt),
+            gt(passwordResetTokens.expiresAt, now),
+            eq(users.isActive, true),
+            isNull(users.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    },
+
     async consumePasswordResetTokenAndUpdatePassword({
       tokenHash,
       passwordHash,
@@ -439,7 +465,11 @@ export function createAuthRepository(db: Database): AuthRepository {
 
         const [updatedUser] = await tx
           .update(users)
-          .set({ passwordHash, updatedAt: now })
+          .set({
+            passwordHash,
+            tokenVersion: sql`${users.tokenVersion} + 1`,
+            updatedAt: now,
+          })
           .where(
             and(eq(users.id, consumed.userId), eq(users.isActive, true), isNull(users.deletedAt)),
           )
@@ -473,7 +503,11 @@ export function createAuthRepository(db: Database): AuthRepository {
       return db.transaction(async (tx) => {
         const [updated] = await tx
           .update(users)
-          .set({ passwordHash, updatedAt: now })
+          .set({
+            passwordHash,
+            tokenVersion: sql`${users.tokenVersion} + 1`,
+            updatedAt: now,
+          })
           .where(and(eq(users.id, userId), eq(users.isActive, true), isNull(users.deletedAt)))
           .returning({ id: users.id });
 
@@ -485,6 +519,11 @@ export function createAuthRepository(db: Database): AuthRepository {
           .update(refreshTokens)
           .set({ revokedAt: now })
           .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+
+        await tx
+          .update(passwordResetTokens)
+          .set({ usedAt: now })
+          .where(and(eq(passwordResetTokens.userId, userId), isNull(passwordResetTokens.usedAt)));
 
         return true;
       });

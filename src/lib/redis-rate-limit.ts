@@ -1,20 +1,20 @@
-import { RedisClient } from 'bun';
 import { z } from 'zod';
-import { env } from '@/config/env.ts';
 import { ServiceUnavailableError } from '@/lib/errors.ts';
+import { closeRedis, type RedisCommandClient, redisClient } from '@/lib/redis.ts';
 import type { RateLimitStore, RateLimitWindowState } from '@/middlewares/rate-limit.ts';
 
 const INCREMENT_SCRIPT = `
 local count = redis.call('INCR', KEYS[1])
-if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
-return {count, redis.call('PTTL', KEYS[1])}
+local ttl = redis.call('PTTL', KEYS[1])
+if count == 1 or ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
 `;
 const WindowSchema = z.tuple([z.number().int().positive(), z.number().int().nonnegative()]);
-interface RedisCommands {
-  send(command: string, args: string[]): Promise<unknown>;
-}
 
-export function createRedisRateLimitStore(client: RedisCommands): RateLimitStore {
+export function createRedisRateLimitStore(client: RedisCommandClient): RateLimitStore {
   return {
     async increment(key: string, windowMs: number): Promise<RateLimitWindowState> {
       try {
@@ -32,12 +32,8 @@ export function createRedisRateLimitStore(client: RedisCommands): RateLimitStore
   };
 }
 
-const redis =
-  env.REDIS_URL === undefined
-    ? undefined
-    : new RedisClient(env.REDIS_URL, { connectionTimeout: 2000, maxRetries: 1 });
 export const redisRateLimitStore =
-  redis === undefined ? undefined : createRedisRateLimitStore(redis);
+  redisClient === undefined ? undefined : createRedisRateLimitStore(redisClient);
 export function closeRateLimitStore(): void {
-  redis?.close();
+  closeRedis();
 }

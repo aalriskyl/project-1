@@ -7,6 +7,7 @@ export interface AuthUser {
   readonly id: string;
   readonly email: string;
   readonly role: UserRole;
+  readonly tokenVersion?: number;
 }
 
 export interface AppVariables {

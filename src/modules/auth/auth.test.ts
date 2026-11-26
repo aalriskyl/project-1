@@ -341,7 +341,12 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
     });
     expect(changePwRes.status).toBe(204);
 
-    // Refresh token issued prior to password change is now revoked -> 401
+    // Refresh token and access token issued prior to password change are immediately revoked -> 401
+    const revokedAccessRes = await testApp.request('/v1/users/me', {
+      headers: { Authorization: `Bearer ${newLoginJson.data.tokens.accessToken}` },
+    });
+    expect(revokedAccessRes.status).toBe(401);
+
     const revokedAfterChangeRes = await testApp.request('/v1/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

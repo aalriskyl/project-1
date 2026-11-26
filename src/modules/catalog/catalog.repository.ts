@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { articles } from '@/db/schema/articles.ts';
 import { type CategoryRow, categories, type SpecFieldDefRow } from '@/db/schema/categories.ts';
@@ -70,9 +70,11 @@ export interface CatalogRepository {
     params: AdminCategoriesFilter & OffsetListParams,
   ): Promise<OffsetListResult<CategoryRow>>;
   findById(id: string): Promise<CategoryRow | null>;
+  findByIds(ids: readonly string[]): Promise<readonly CategoryRow[]>;
   findActiveBySlug(slug: string): Promise<CategoryRow | null>;
   listActiveChildren(parentId: string): Promise<readonly CategoryRow[]>;
   hasNonDeletedChildren(parentId: string): Promise<boolean>;
+  hasAnyChildren(parentId: string): Promise<boolean>;
   hasNonDeletedProducts(categoryId: string): Promise<boolean>;
   create(input: CreateCategoryRecord): Promise<CategoryRow>;
   updateById(id: string, patch: UpdateCategoryRecord): Promise<CategoryRow | null>;
@@ -196,6 +198,16 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       return row ?? null;
     },
 
+    async findByIds(ids: readonly string[]): Promise<readonly CategoryRow[]> {
+      if (ids.length === 0) {
+        return [];
+      }
+      return db
+        .select()
+        .from(categories)
+        .where(inArray(categories.id, [...ids]));
+    },
+
     async findActiveBySlug(slug: string): Promise<CategoryRow | null> {
       const [row] = await db
         .select()
@@ -236,6 +248,15 @@ export function createCatalogRepository(db: Database): CatalogRepository {
             isNull(categories.deletedAt),
           ),
         )
+        .limit(1);
+      return child !== undefined;
+    },
+
+    async hasAnyChildren(parentId: string): Promise<boolean> {
+      const [child] = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.parentId, parentId))
         .limit(1);
       return child !== undefined;
     },
@@ -325,7 +346,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       const deleted = await withMediaMutation(db, 'categories', async (tx) => {
         const [row] = await tx
           .update(categories)
-          .set({ isActive: false, deletedAt, updatedAt: deletedAt })
+          .set({ isActive: false, deletedAt, updatedAt: new Date() })
           .where(eq(categories.id, id))
           .returning();
         return row ?? null;

@@ -117,6 +117,20 @@ describe('CatalogService (unit)', () => {
 describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/seo/sitemap)', () => {
   async function setupApp() {
     const store = createInMemoryDatastore();
+    store.seedUser({
+      id: adminActor.id,
+      email: adminActor.email,
+      passwordHash: 'hash',
+      displayName: 'Catalog Admin',
+      role: 'admin',
+    });
+    store.seedUser({
+      id: regularActor.id,
+      email: regularActor.email,
+      passwordHash: 'hash',
+      displayName: 'Regular User',
+      role: 'user',
+    });
     const adminToken = (await signAccessToken(adminActor)).token;
     const userToken = (await signAccessToken(regularActor)).token;
 
@@ -199,11 +213,22 @@ describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/s
     const firstRoot = treeData.data[0];
     expect(firstRoot !== undefined && 'children' in firstRoot && firstRoot.children.length).toBe(1);
 
-    // Conditional request with matching ETag returns 304 Not Modified
+    // Regression H11: contradictory tree=true + rootOnly=false or parentId returns 422
+    expect((await testApp.request('/v1/categories?tree=true&rootOnly=false')).status).toBe(422);
+    expect(
+      (await testApp.request(`/v1/categories?tree=true&parentId=${rootCreated.data.id}`)).status,
+    ).toBe(422);
+
+    // Conditional request with matching ETag (including multi-ETag header) returns 304 Not Modified
     const cachedRes = await testApp.request('/v1/categories?tree=true', {
       headers: { 'If-None-Match': etag ?? '' },
     });
     expect(cachedRes.status).toBe(304);
+
+    const multiEtagRes = await testApp.request('/v1/categories?tree=true', {
+      headers: { 'If-None-Match': `W/"stale-tag", ${etag ?? ''}` },
+    });
+    expect(multiEtagRes.status).toBe(304);
 
     const slugDetailRes = await testApp.request('/v1/categories/hand-mixer');
     expect(slugDetailRes.status).toBe(200);

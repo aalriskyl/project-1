@@ -168,6 +168,7 @@ export interface ProductsRepository {
   findActiveCardsByIds(ids: readonly string[]): Promise<readonly ProductCardRow[]>;
   listRecommendations(params: {
     readonly categoryId?: string;
+    readonly categoryIds?: readonly string[];
     readonly excludeProductId?: string;
     readonly limit: number;
   }): Promise<readonly ProductCardRow[]>;
@@ -546,6 +547,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async listRecommendations({
       categoryId,
+      categoryIds,
       excludeProductId,
       limit,
     }): Promise<readonly ProductCardRow[]> {
@@ -553,7 +555,12 @@ export function createProductsRepository(db: Database): ProductsRepository {
       if (excludeProductId !== undefined) {
         baseConditions.push(ne(products.id, excludeProductId));
       }
-      if (categoryId !== undefined) {
+      if (categoryIds !== undefined) {
+        if (categoryIds.length === 0) {
+          return [];
+        }
+        baseConditions.push(inArray(products.categoryId, [...categoryIds]));
+      } else if (categoryId !== undefined) {
         baseConditions.push(eq(products.categoryId, categoryId));
       }
 
@@ -692,7 +699,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
       const deleted = await withMediaMutation(db, 'products', async (tx) => {
         const [row] = await tx
           .update(products)
-          .set({ isActive: false, deletedAt, updatedAt: deletedAt })
+          .set({ isActive: false, deletedAt, updatedAt: new Date() })
           .where(eq(products.id, id))
           .returning();
         return row ?? null;

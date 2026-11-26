@@ -3,6 +3,7 @@ import { generateId } from '@/lib/id.ts';
 import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
 import { hashPassword } from '@/lib/password.ts';
 import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
+import type { ActiveSessionUserState } from '@/middlewares/auth.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { UserEntity, UsersRepository } from '@/modules/users/users.repository.ts';
 import type {
@@ -15,6 +16,7 @@ import type {
 import type { AuthUser } from '@/types/app.ts';
 
 export interface UsersService {
+  resolveAuthUser(userId: string): Promise<ActiveSessionUserState | null>;
   getMe(actor: AuthUser): Promise<PublicUser>;
   updateMe(actor: AuthUser, input: UpdateMeBody): Promise<PublicUser>;
   getUserById(actor: AuthUser, targetUserId: string): Promise<PublicUser>;
@@ -47,6 +49,21 @@ export function serializeUser(entity: UserEntity): PublicUser {
 
 export function createUsersService(usersRepo: UsersRepository): UsersService {
   return {
+    async resolveAuthUser(userId: string): Promise<ActiveSessionUserState | null> {
+      const user = await usersRepo.findById(userId);
+      if (user === null) {
+        return null;
+      }
+      return {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        deletedAt: user.deletedAt,
+        tokenVersion: user.tokenVersion,
+      };
+    },
+
     async getMe(actor: AuthUser): Promise<PublicUser> {
       const user = await usersRepo.findById(actor.id);
       if (user === null) {

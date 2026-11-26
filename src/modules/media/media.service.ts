@@ -111,7 +111,15 @@ export function createMediaService(
 
       for (const [bucket, items] of byBucket.entries()) {
         const orphanPaths = items.map((o) => o.objectPath);
-        await provider.deleteObjects(bucket, orphanPaths);
+        try {
+          await provider.deleteObjects(bucket, orphanPaths);
+        } catch (err) {
+          const remainingIds = candidates
+            .filter((c) => !deletedPaths.includes(c.objectPath))
+            .map((c) => c.id);
+          await mediaRepo.releaseOrphanClaims(remainingIds);
+          throw err;
+        }
 
         for (const orphan of items) {
           deletedPaths.push(orphan.objectPath);

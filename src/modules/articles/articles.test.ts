@@ -28,6 +28,20 @@ const userActor: AuthUser = {
 describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
   async function setupApp() {
     const store = createInMemoryDatastore();
+    store.seedUser({
+      id: adminActor.id,
+      email: adminActor.email,
+      passwordHash: 'hash',
+      displayName: 'SEO Admin',
+      role: 'admin',
+    });
+    store.seedUser({
+      id: userActor.id,
+      email: userActor.email,
+      passwordHash: 'hash',
+      displayName: 'Customer',
+      role: 'user',
+    });
     const adminToken = (await signAccessToken(adminActor)).token;
     const userToken = (await signAccessToken(userActor)).token;
     const revalidated: string[][] = [];
