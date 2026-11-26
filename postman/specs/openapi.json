@@ -25,7 +25,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "object",
@@ -52,7 +54,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -71,6 +72,72 @@
           },
           "errorCode": {
             "type": "string",
+            "enum": [
+              "BAD_REQUEST",
+              "UNAUTHORIZED",
+              "FORBIDDEN",
+              "RESOURCE_NOT_FOUND",
+              "CONFLICT",
+              "VALIDATION_ERROR",
+              "RATE_LIMIT_EXCEEDED",
+              "SERVICE_UNAVAILABLE",
+              "INTERNAL_SERVER_ERROR",
+              "ROUTE_NOT_FOUND",
+              "PAYLOAD_TOO_LARGE",
+              "REQUEST_TIMEOUT",
+              "ADMIN_REQUIRED",
+              "INVALID_GOOGLE_TOKEN",
+              "INVALID_TOKEN",
+              "MISSING_TOKEN",
+              "ACCOUNT_INACTIVE",
+              "TOKEN_REVOKED",
+              "OAUTH_NOT_CONFIGURED",
+              "UNVERIFIED_GOOGLE_EMAIL",
+              "INVALID_CREDENTIALS",
+              "GOOGLE_LINK_REQUIRED",
+              "GOOGLE_ACCOUNT_MISMATCH",
+              "MAIL_NOT_CONFIGURED",
+              "INVALID_RESET_TOKEN",
+              "PASSWORD_NOT_SET",
+              "INVALID_REFRESH_TOKEN",
+              "REFRESH_TOKEN_EXPIRED",
+              "REFRESH_TOKEN_REUSED",
+              "EMAIL_ALREADY_EXISTS",
+              "GOOGLE_SUB_MISMATCH",
+              "GOOGLE_ALREADY_LINKED",
+              "LAST_ADMIN_REQUIRED",
+              "USER_NOT_FOUND",
+              "USER_FORBIDDEN",
+              "CANNOT_DEACTIVATE_SELF",
+              "CANNOT_DEMOTE_SELF",
+              "SLUG_ALREADY_EXISTS",
+              "SKU_ALREADY_EXISTS",
+              "PARENT_CATEGORY_NOT_FOUND",
+              "CATEGORY_DEPTH_CONFLICT",
+              "CATEGORY_NOT_FOUND",
+              "CATEGORY_HAS_CHILDREN",
+              "CATEGORY_HAS_PRODUCTS",
+              "PRODUCT_NOT_FOUND",
+              "COMPARE_PRODUCTS_NOT_FOUND",
+              "SPAREPART_PRODUCT_NOT_FOUND",
+              "ARTICLE_NOT_FOUND",
+              "REVIEW_NOT_FOUND",
+              "REVIEW_ALREADY_EXISTS",
+              "MEDIA_NOT_FOUND",
+              "MEDIA_DELETING",
+              "MEDIA_CLEANUP_DISABLED",
+              "MEDIA_NOT_VERIFIED",
+              "MEDIA_UPLOAD_MISSING",
+              "MEDIA_UPLOAD_MISMATCH",
+              "STORAGE_UNAVAILABLE",
+              "STORAGE_NOT_CONFIGURED",
+              "STORAGE_SIGN_FAILED",
+              "STORAGE_DELETE_FAILED",
+              "STORAGE_BUCKET_UNSAFE",
+              "FILE_TOO_LARGE",
+              "MAIL_DELIVERY_FAILED",
+              "RATE_LIMIT_UNAVAILABLE"
+            ],
             "example": "VALIDATION_ERROR"
           },
           "requestId": {
@@ -117,7 +184,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/AuthSession"
@@ -125,7 +194,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -193,7 +261,8 @@
           },
           "isActive": {
             "type": "boolean",
-            "example": true
+            "example": true,
+            "deprecated": true
           },
           "status": {
             "$ref": "#/components/schemas/RecordStatus"
@@ -204,7 +273,8 @@
               "null"
             ],
             "format": "date-time",
-            "example": null
+            "example": null,
+            "deprecated": true
           },
           "createdAt": {
             "type": "string",
@@ -290,7 +360,8 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 120,
-            "example": "Ada Lovelace"
+            "example": "Ada Lovelace",
+            "deprecated": true
           },
           "displayName": {
             "type": "string",
@@ -363,7 +434,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "object",
@@ -379,7 +452,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -480,7 +552,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/User"
@@ -488,7 +562,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -537,7 +610,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -548,6 +623,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -576,6 +659,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -584,7 +668,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -722,7 +805,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -740,7 +825,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -763,6 +847,29 @@
               "children"
             ]
           }
+        ]
+      },
+      "CategoryParentSummary": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug"
         ]
       },
       "SpecFieldDef": {
@@ -824,6 +931,9 @@
             ],
             "format": "uuid",
             "example": null
+          },
+          "parent": {
+            "$ref": "#/components/schemas/CategoryParentSummary"
           },
           "name": {
             "type": "string",
@@ -897,7 +1007,8 @@
             "type": "integer"
           },
           "isActive": {
-            "type": "boolean"
+            "type": "boolean",
+            "deprecated": true
           },
           "status": {
             "$ref": "#/components/schemas/RecordStatus"
@@ -907,7 +1018,8 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "deprecated": true
           },
           "createdAt": {
             "type": "string",
@@ -921,6 +1033,7 @@
         "required": [
           "id",
           "parentId",
+          "parent",
           "name",
           "slug",
           "description",
@@ -951,7 +1064,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/CategoryDetail"
@@ -959,7 +1074,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -971,9 +1085,6 @@
           {
             "type": "object",
             "properties": {
-              "parent": {
-                "$ref": "#/components/schemas/CategoryParentSummary"
-              },
               "subCategories": {
                 "type": "array",
                 "items": {
@@ -988,34 +1099,10 @@
               }
             },
             "required": [
-              "parent",
               "subCategories",
               "effectiveSpecSchema"
             ]
           }
-        ]
-      },
-      "CategoryParentSummary": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "slug"
         ]
       },
       "ProductReviewCursorPage": {
@@ -1028,7 +1115,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -1039,6 +1128,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -1067,6 +1164,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -1075,7 +1173,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -1092,6 +1189,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "product": {
+            "$ref": "#/components/schemas/ProductSummaryRef"
+          },
           "userId": {
             "type": "string",
             "format": "uuid"
@@ -1099,6 +1199,9 @@
           "authorName": {
             "type": "string",
             "example": "Budi Santoso"
+          },
+          "author": {
+            "$ref": "#/components/schemas/AuthorSummaryRef"
           },
           "orderId": {
             "type": [
@@ -1124,7 +1227,8 @@
             "type": "boolean"
           },
           "isActive": {
-            "type": "boolean"
+            "type": "boolean",
+            "deprecated": true
           },
           "status": {
             "$ref": "#/components/schemas/RecordStatus"
@@ -1134,7 +1238,8 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "deprecated": true
           },
           "createdAt": {
             "type": "string",
@@ -1148,8 +1253,10 @@
         "required": [
           "id",
           "productId",
+          "product",
           "userId",
           "authorName",
+          "author",
           "orderId",
           "rating",
           "comment",
@@ -1159,6 +1266,47 @@
           "deletedAt",
           "createdAt",
           "updatedAt"
+        ]
+      },
+      "ProductSummaryRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "01936c8e-7f2a-7000-8000-000000000401"
+          },
+          "name": {
+            "type": "string",
+            "example": "Genset 30 kVA Silent Diesel Tsuzumi TPG30 Powered by Perkins"
+          },
+          "slug": {
+            "type": "string",
+            "example": "genset-30-kva-silent-diesel-tsuzumi-tpg30"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ]
+      },
+      "AuthorSummaryRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "01936c8e-7f2a-7000-8000-000000000001"
+          },
+          "name": {
+            "type": "string",
+            "example": "Budi Santoso"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "ProductReviewEnvelope": {
@@ -1171,7 +1319,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/ProductReview"
@@ -1179,7 +1329,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -1201,7 +1350,8 @@
           },
           "orderId": {
             "type": "null",
-            "description": "Reserved for future server-verified purchases. Omit or send null."
+            "description": "Reserved for future server-verified purchases. Omit or send null.",
+            "deprecated": true
           }
         },
         "required": [
@@ -1238,7 +1388,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -1249,6 +1401,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -1277,6 +1437,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -1285,7 +1446,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -1301,6 +1461,9 @@
           "categoryId": {
             "type": "string",
             "format": "uuid"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummaryRef"
           },
           "brandSlug": {
             "type": [
@@ -1350,7 +1513,8 @@
             "type": "boolean"
           },
           "isActive": {
-            "type": "boolean"
+            "type": "boolean",
+            "deprecated": true
           },
           "status": {
             "$ref": "#/components/schemas/RecordStatus"
@@ -1360,7 +1524,8 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "deprecated": true
           },
           "primaryImageUrl": {
             "type": [
@@ -1391,6 +1556,7 @@
         "required": [
           "id",
           "categoryId",
+          "category",
           "brandSlug",
           "name",
           "slug",
@@ -1410,6 +1576,29 @@
           "updatedAt"
         ]
       },
+      "CategorySummaryRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "01936c8e-7f2a-7000-8000-000000000101"
+          },
+          "name": {
+            "type": "string",
+            "example": "Engine Perkins"
+          },
+          "slug": {
+            "type": "string",
+            "example": "engine-perkins"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ]
+      },
       "CompareProductsEnvelope": {
         "type": "object",
         "properties": {
@@ -1420,7 +1609,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "object",
@@ -1446,7 +1637,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -1697,7 +1887,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -1708,7 +1900,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -1722,7 +1913,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -1733,6 +1926,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -1761,6 +1962,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -1769,7 +1971,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -1784,7 +1985,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/ProductDetail"
@@ -1792,7 +1995,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -1806,7 +2008,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -1817,6 +2021,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -1845,6 +2057,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -1853,7 +2066,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -1872,6 +2084,19 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "author": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuthorSummaryRef"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
           },
           "title": {
             "type": "string",
@@ -1937,7 +2162,8 @@
             "type": "boolean"
           },
           "isActive": {
-            "type": "boolean"
+            "type": "boolean",
+            "deprecated": true
           },
           "status": {
             "$ref": "#/components/schemas/RecordStatus"
@@ -1947,7 +2173,8 @@
               "string",
               "null"
             ],
-            "format": "date-time"
+            "format": "date-time",
+            "deprecated": true
           },
           "publishedAt": {
             "type": [
@@ -1968,6 +2195,7 @@
         "required": [
           "id",
           "authorId",
+          "author",
           "title",
           "slug",
           "excerpt",
@@ -1998,7 +2226,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/ArticleDetail"
@@ -2006,7 +2236,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -2063,6 +2292,9 @@
           "slug": {
             "type": "string"
           },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummaryRef"
+          },
           "priceIdr": {
             "type": "integer",
             "minimum": 0
@@ -2085,6 +2317,7 @@
           "id",
           "name",
           "slug",
+          "category",
           "priceIdr",
           "requiresQuote",
           "primaryImageUrl",
@@ -2101,7 +2334,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "object",
@@ -2134,7 +2369,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -2166,7 +2400,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -2177,6 +2413,14 @@
           "meta": {
             "type": "object",
             "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "cursor",
+                  "offset"
+                ],
+                "description": "Pagination mode; offset responses also include page, total and totalPages"
+              },
               "nextCursor": {
                 "type": [
                   "string",
@@ -2205,6 +2449,7 @@
               }
             },
             "required": [
+              "mode",
               "nextCursor",
               "hasMore",
               "limit"
@@ -2213,7 +2458,6 @@
         },
         "required": [
           "success",
-          "message",
           "data",
           "meta"
         ]
@@ -2228,7 +2472,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/Category"
@@ -2236,7 +2482,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -2817,7 +3062,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "array",
@@ -2828,7 +3075,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -3097,7 +3343,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "type": "object",
@@ -3126,7 +3374,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -3140,7 +3387,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/SignedUploadUrl"
@@ -3148,7 +3397,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },
@@ -3261,7 +3509,9 @@
             ]
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Human-readable summary; prefer the HTTP status"
           },
           "data": {
             "$ref": "#/components/schemas/CleanupOrphansResult"
@@ -3269,7 +3519,6 @@
         },
         "required": [
           "success",
-          "message",
           "data"
         ]
       },

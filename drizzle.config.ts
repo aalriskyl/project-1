@@ -20,6 +20,10 @@ function normalizeMigrationUrl(rawUrl: string | undefined): string | undefined {
 }
 
 const directUrl = normalizeMigrationUrl(process.env['DIRECT_URL']);
+// `generate` diffs snapshots offline; only commands that connect need a URL.
+if (directUrl === undefined && process.argv.includes('migrate')) {
+  throw new Error('DIRECT_URL is required for drizzle-kit migrations (set it in .env)');
+}
 
 export default defineConfig({
   dialect: 'postgresql',

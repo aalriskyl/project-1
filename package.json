@@ -20,7 +20,8 @@
     "db:studio": "bun --bun drizzle-kit studio",
     "docs:openapi": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts",
     "docs:check": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts --check",
-    "docs:postman": "bun run scripts/export-postman-json.ts"
+    "docs:postman": "bun run scripts/export-postman-json.ts",
+    "docs:postman:check": "bun run scripts/export-postman-json.ts --check"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",

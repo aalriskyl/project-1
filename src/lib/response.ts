@@ -12,7 +12,10 @@ export function createSuccessEnvelopeSchema<T extends z.ZodType>(
   return z
     .object({
       success: z.literal(true),
-      message: z.string(),
+      message: z.string().optional().openapi({
+        deprecated: true,
+        description: 'Human-readable summary; prefer the HTTP status',
+      }),
       data: dataSchema,
     })
     .openapi(schemaName);

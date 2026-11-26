@@ -7,6 +7,7 @@ import {
   createCursorPageSchema,
   QueryBooleanSchema,
 } from '@/lib/pagination.ts';
+import { AuthorSummaryRefSchema, CategorySummaryRefSchema } from '@/lib/relations.ts';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { SearchQueryParamSchema } from '@/lib/search.ts';
 import {
@@ -31,6 +32,7 @@ export const RelatedProductCardSchema = z
     id: z.uuid(),
     name: z.string(),
     slug: z.string(),
+    category: CategorySummaryRefSchema,
     priceIdr: z.number().int().nonnegative(),
     requiresQuote: z.boolean(),
     primaryImageUrl: z.string().nullable(),
@@ -44,6 +46,7 @@ export const ArticleSummarySchema = z
   .object({
     id: z.uuid().openapi({ example: '01936c8e-7f2a-7000-8000-000000000201' }),
     authorId: z.uuid().nullable(),
+    author: AuthorSummaryRefSchema.nullable(),
     title: z
       .string()
       .openapi({ example: 'Cara Memilih Genset Silent 30 kVA untuk Kebutuhan Industri' }),
@@ -56,9 +59,9 @@ export const ArticleSummarySchema = z
     focusKeyword: z.string().nullable().openapi({ example: 'genset silent 30 kva' }),
     tags: z.array(z.string()),
     isPublished: z.boolean(),
-    isActive: z.boolean(),
+    isActive: z.boolean().openapi({ deprecated: true }),
     status: RecordStatusSchema,
-    deletedAt: z.iso.datetime().nullable(),
+    deletedAt: z.iso.datetime().nullable().openapi({ deprecated: true }),
     publishedAt: z.iso.datetime().nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),

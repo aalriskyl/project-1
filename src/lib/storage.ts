@@ -78,8 +78,18 @@ export function matchesImageSignature(bytes: Uint8Array, type: string): boolean 
   if (type === 'image/webp') return at(0, 'RIFF') && at(8, 'WEBP');
   if (type === 'image/avif') {
     if (!at(4, 'ftyp')) return false;
-    if (at(8, 'avif') || at(8, 'avis')) return true;
-    for (let i = 16; i + 4 <= bytes.length; i += 4) if (at(i, 'avif') || at(i, 'avis')) return true;
+    // Validate brands inside the declared ftyp box; an `avif` literal elsewhere in
+    // an ISO-BMFF file must not pass as an AVIF image.
+    const boxSize =
+      ((bytes[0] ?? 0) << 24) | ((bytes[1] ?? 0) << 16) | ((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0);
+    if (boxSize < 16 || boxSize > bytes.length) return false;
+    const brands: string[] = [];
+    for (let i = 8; i + 4 <= boxSize; i += 4) {
+      brands.push(
+        String.fromCharCode(bytes[i] ?? 0, bytes[i + 1] ?? 0, bytes[i + 2] ?? 0, bytes[i + 3] ?? 0),
+      );
+    }
+    return brands.some((brand) => brand === 'avif' || brand === 'avis');
   }
   return false;
 }

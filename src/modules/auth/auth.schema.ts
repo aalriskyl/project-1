@@ -15,7 +15,13 @@ export const RegisterBodySchema = z
       .min(12, 'Password must be at least 12 characters')
       .max(128, 'Password must be at most 128 characters')
       .openapi({ example: 'correct-horse-battery-staple' }),
-    name: z.string().trim().min(1).max(120).optional().openapi({ example: 'Ada Lovelace' }),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .optional()
+      .openapi({ example: 'Ada Lovelace', deprecated: true }),
     displayName: z.string().trim().min(1).max(120).optional().openapi({ example: 'Ada Lovelace' }),
     phone: PhoneE164Schema.optional().openapi({ example: '+6281234567890' }),
     address: UserAddressSchema.optional(),

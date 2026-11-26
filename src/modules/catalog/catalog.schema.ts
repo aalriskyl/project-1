@@ -44,10 +44,20 @@ export const SpecSchemaArraySchema = z
 
 const SlugInputSchema = createSlugSchema(140);
 
+// Keep the v1 component name stable for generated clients; it mirrors CategorySummaryRef.
+export const CategoryParentSummarySchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    slug: z.string(),
+  })
+  .openapi('CategoryParentSummary');
+
 export const CategorySchema = z
   .object({
     id: z.uuid().openapi({ example: '01936c8e-7f2a-7000-8000-000000000101' }),
     parentId: z.uuid().nullable().openapi({ example: null }),
+    parent: CategoryParentSummarySchema.nullable(),
     name: z.string().openapi({ example: 'Genset Silent' }),
     slug: z.string().openapi({ example: 'genset-silent' }),
     description: z.string().nullable().openapi({ example: 'Industrial silent diesel generators' }),
@@ -61,9 +71,9 @@ export const CategorySchema = z
     bannerImageUrl: z.string().nullable(),
     specSchema: z.array(SpecFieldDefSchema),
     sortOrder: z.number().int(),
-    isActive: z.boolean(),
+    isActive: z.boolean().openapi({ deprecated: true }),
     status: RecordStatusSchema,
-    deletedAt: z.iso.datetime().nullable(),
+    deletedAt: z.iso.datetime().nullable().openapi({ deprecated: true }),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -77,16 +87,7 @@ export const CategoryTreeNodeSchema = CategorySchema.extend({
 
 export type CategoryTreeNode = z.infer<typeof CategoryTreeNodeSchema>;
 
-export const CategoryParentSummarySchema = z
-  .object({
-    id: z.uuid(),
-    name: z.string(),
-    slug: z.string(),
-  })
-  .openapi('CategoryParentSummary');
-
 export const CategoryDetailSchema = CategorySchema.extend({
-  parent: CategoryParentSummarySchema.nullable(),
   subCategories: z.array(CategorySchema),
   effectiveSpecSchema: z.array(SpecFieldDefSchema),
 }).openapi('CategoryDetail');

@@ -15,6 +15,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
+import { categories } from '@/db/schema/categories.ts';
 import {
   type ProductCustomSpecRow,
   type ProductMediaItemRow,
@@ -62,6 +63,8 @@ export type ProductSortCursor =
 
 export interface ProductCardRow extends SoftDeletableEntity {
   readonly categoryId: string;
+  readonly categoryName: string;
+  readonly categorySlug: string;
   readonly brandSlug: string | null;
   readonly name: string;
   readonly slug: string;
@@ -204,6 +207,8 @@ export function createProductsRepository(db: Database): ProductsRepository {
   const cardColumns = {
     id: products.id,
     categoryId: products.categoryId,
+    categoryName: categories.name,
+    categorySlug: categories.slug,
     brandSlug: products.brandSlug,
     name: products.name,
     slug: products.slug,
@@ -220,7 +225,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
     reviewCount: products.reviewCount,
     createdAt: products.createdAt,
     updatedAt: products.updatedAt,
-  };
+  } satisfies Record<keyof ProductCardRow, unknown>;
 
   function buildSpecFilterCondition(specFilter: ProductSpecFilter): SQL {
     const { key } = specFilter;
@@ -393,6 +398,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
       return db
         .select(cardColumns)
         .from(products)
+        .innerJoin(categories, eq(products.categoryId, categories.id))
         .where(and(...conditions))
         .orderBy(...orderByClauses)
         .limit(filter.limit);
@@ -432,6 +438,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
       return db
         .select(cardColumns)
         .from(products)
+        .innerJoin(categories, eq(products.categoryId, categories.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(products.createdAt), desc(products.id))
         .limit(limit);
@@ -469,6 +476,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
         db
           .select(cardColumns)
           .from(products)
+          .innerJoin(categories, eq(products.categoryId, categories.id))
           .where(whereClause)
           .orderBy(desc(products.createdAt), desc(products.id))
           .limit(limit)
@@ -476,6 +484,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
         db
           .select({ total: sql<number>`count(*)::int` })
           .from(products)
+          .innerJoin(categories, eq(products.categoryId, categories.id))
           .where(whereClause),
       ]);
 
@@ -531,6 +540,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
       const rows = await db
         .select(cardColumns)
         .from(products)
+        .innerJoin(categories, eq(products.categoryId, categories.id))
         .where(
           and(
             inArray(products.id, [...ids]),
@@ -567,6 +577,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
       return db
         .select(cardColumns)
         .from(products)
+        .innerJoin(categories, eq(products.categoryId, categories.id))
         .where(and(...baseConditions))
         .orderBy(desc(products.isFeatured), desc(products.createdAt), desc(products.id))
         .limit(limit);
@@ -605,6 +616,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
         })
         .from(productSpareparts)
         .innerJoin(products, eq(productSpareparts.sparepartProductId, products.id))
+        .innerJoin(categories, eq(products.categoryId, categories.id))
         .where(and(...conditions))
         .orderBy(desc(products.createdAt), desc(products.id))
         .limit(limit);
@@ -612,6 +624,14 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async replaceSpareparts(parentProductId, items): Promise<readonly ProductSparepartCardRow[]> {
       await db.transaction(async (tx) => {
+        // Serialize concurrent replacements for the same parent: without a row lock,
+        // two admins on a product with no links both DELETE nothing and race the INSERT.
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, parentProductId))
+          .for('update')
+          .limit(1);
         await tx
           .delete(productSpareparts)
           .where(eq(productSpareparts.parentProductId, parentProductId));

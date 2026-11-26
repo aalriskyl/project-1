@@ -56,8 +56,17 @@ function serializeReview(row: ProductReviewWithAuthorRow): PublicProductReview {
   return {
     id: row.id,
     productId: row.productId,
+    product: {
+      id: row.productId,
+      name: row.productName,
+      slug: row.productSlug,
+    },
     userId: row.userId,
     authorName: row.authorName,
+    author: {
+      id: row.userId,
+      name: row.authorName,
+    },
     orderId: row.orderId,
     rating: row.rating,
     comment: row.comment,
@@ -154,7 +163,7 @@ export function createReviewsService(
         comment: body.comment ?? null,
       });
 
-      revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`]);
       return serializeReview(created);
     },
 
@@ -178,7 +187,7 @@ export function createReviewsService(
         throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
       }
 
-      revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`]);
       return serializeReview(updated);
     },
 
@@ -196,7 +205,7 @@ export function createReviewsService(
         throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
       }
 
-      revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`]);
     },
 
     async moderateReview(
@@ -217,7 +226,7 @@ export function createReviewsService(
 
       const product = await productsRepo.findById(updated.productId);
       if (product !== null) {
-        revalidator.notify(['products', `product:${product.slug}`]);
+        await revalidator.notify(['products', `product:${product.slug}`]);
       }
 
       return serializeReview(updated);
@@ -233,7 +242,7 @@ export function createReviewsService(
 
       const product = await productsRepo.findById(deleted.productId);
       if (product !== null) {
-        revalidator.notify(['products', `product:${product.slug}`]);
+        await revalidator.notify(['products', `product:${product.slug}`]);
       }
     },
   };

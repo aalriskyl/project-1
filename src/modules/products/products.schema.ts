@@ -9,6 +9,7 @@ import {
   MAX_PAGE_SIZE,
   QueryBooleanSchema,
 } from '@/lib/pagination.ts';
+import { CategorySummaryRefSchema } from '@/lib/relations.ts';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { SearchQueryParamSchema } from '@/lib/search.ts';
 import {
@@ -127,6 +128,7 @@ export const ProductCardSchema = z
   .object({
     id: z.uuid().openapi({ example: '01936c8e-7f2a-7000-8000-000000000401' }),
     categoryId: z.uuid(),
+    category: CategorySummaryRefSchema,
     brandSlug: z.string().nullable().openapi({ example: 'perkins' }),
     name: z
       .string()
@@ -140,9 +142,9 @@ export const ProductCardSchema = z
     requiresQuote: z.boolean().openapi({ example: true }),
     stock: z.number().int().nonnegative().openapi({ example: 2 }),
     isFeatured: z.boolean(),
-    isActive: z.boolean(),
+    isActive: z.boolean().openapi({ deprecated: true }),
     status: RecordStatusSchema,
-    deletedAt: z.iso.datetime().nullable(),
+    deletedAt: z.iso.datetime().nullable().openapi({ deprecated: true }),
     primaryImageUrl: z.string().nullable(),
     ratingAvg: z.number().min(0).max(5).openapi({ example: 4.85 }),
     reviewCount: z.number().int().nonnegative().openapi({ example: 12 }),

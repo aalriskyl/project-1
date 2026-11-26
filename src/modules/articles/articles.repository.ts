@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, ne, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { type ArticleRow, articles } from '@/db/schema/articles.ts';
+import { users } from '@/db/schema/users.ts';
 import {
   activeRecordConditions,
   buildDateRangeConditions,
@@ -24,6 +25,7 @@ import type {
 
 export interface ArticleSummaryRow extends SoftDeletableEntity, SeoMetadataRecord {
   readonly authorId: string | null;
+  readonly authorName: string | null;
   readonly title: string;
   readonly slug: string;
   readonly excerpt: string | null;
@@ -31,6 +33,10 @@ export interface ArticleSummaryRow extends SoftDeletableEntity, SeoMetadataRecor
   readonly tags: string[];
   readonly isPublished: boolean;
   readonly publishedAt: Date | null;
+}
+
+export interface ArticleDetailRow extends ArticleRow {
+  readonly authorName: string | null;
 }
 
 export interface CreateArticleRecord extends SeoMetadataRecord {
@@ -82,15 +88,15 @@ export interface ArticlesRepository {
   listAdminOffset(
     params: AdminArticlesFilter & OffsetListParams,
   ): Promise<OffsetListResult<ArticleSummaryRow>>;
-  findPublishedBySlug(slug: string): Promise<ArticleRow | null>;
-  findById(id: string): Promise<ArticleRow | null>;
+  findPublishedBySlug(slug: string): Promise<ArticleDetailRow | null>;
+  findById(id: string): Promise<ArticleDetailRow | null>;
   findRelatedPublished(params: {
     readonly excludeId: string;
     readonly tags: readonly string[];
     readonly limit: number;
   }): Promise<readonly ArticleSummaryRow[]>;
-  create(input: CreateArticleRecord): Promise<ArticleRow>;
-  updateById(id: string, patch: UpdateArticleRecord): Promise<ArticleRow | null>;
+  create(input: CreateArticleRecord): Promise<ArticleDetailRow>;
+  updateById(id: string, patch: UpdateArticleRecord): Promise<ArticleDetailRow | null>;
   softDeleteById(id: string, deletedAt: Date): Promise<boolean>;
 }
 
@@ -100,6 +106,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
   const summaryColumns = {
     id: articles.id,
     authorId: articles.authorId,
+    authorName: users.displayName,
     title: articles.title,
     slug: articles.slug,
     excerpt: articles.excerpt,
@@ -117,6 +124,12 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
     createdAt: articles.createdAt,
     updatedAt: articles.updatedAt,
     deletedAt: articles.deletedAt,
+  };
+
+  const detailColumns = {
+    ...summaryColumns,
+    contentMd: articles.contentMd,
+    relatedProductIds: articles.relatedProductIds,
   };
 
   function buildAdminFilterConditions(params: AdminArticlesFilter): SQL[] {
@@ -185,6 +198,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       return db
         .select(summaryColumns)
         .from(articles)
+        .leftJoin(users, eq(articles.authorId, users.id))
         .where(and(...conditions))
         .orderBy(desc(articles.publishedAt), desc(articles.id))
         .limit(limit);
@@ -221,6 +235,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       return db
         .select(summaryColumns)
         .from(articles)
+        .leftJoin(users, eq(articles.authorId, users.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(articles.createdAt), desc(articles.id))
         .limit(limit);
@@ -254,6 +269,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
         db
           .select(summaryColumns)
           .from(articles)
+          .leftJoin(users, eq(articles.authorId, users.id))
           .where(whereClause)
           .orderBy(desc(articles.createdAt), desc(articles.id))
           .limit(limit)
@@ -267,10 +283,11 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       return { items, total: countRows[0]?.total ?? 0 };
     },
 
-    async findPublishedBySlug(slug: string): Promise<ArticleRow | null> {
+    async findPublishedBySlug(slug: string): Promise<ArticleDetailRow | null> {
       const [row] = await db
-        .select()
+        .select(detailColumns)
         .from(articles)
+        .leftJoin(users, eq(articles.authorId, users.id))
         .where(
           and(
             eq(articles.slug, slug),
@@ -283,8 +300,13 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       return row ?? null;
     },
 
-    async findById(id: string): Promise<ArticleRow | null> {
-      const [row] = await db.select().from(articles).where(eq(articles.id, id)).limit(1);
+    async findById(id: string): Promise<ArticleDetailRow | null> {
+      const [row] = await db
+        .select(detailColumns)
+        .from(articles)
+        .leftJoin(users, eq(articles.authorId, users.id))
+        .where(eq(articles.id, id))
+        .limit(1);
       return row ?? null;
     },
 
@@ -297,6 +319,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
         const byTag = await db
           .select(summaryColumns)
           .from(articles)
+          .leftJoin(users, eq(articles.authorId, users.id))
           .where(
             and(
               ne(articles.id, excludeId),
@@ -317,6 +340,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
         const recent = await db
           .select(summaryColumns)
           .from(articles)
+          .leftJoin(users, eq(articles.authorId, users.id))
           .where(
             and(
               ne(articles.id, excludeId),
@@ -341,6 +365,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       return db
         .select(summaryColumns)
         .from(articles)
+        .leftJoin(users, eq(articles.authorId, users.id))
         .where(
           and(
             ne(articles.id, excludeId),
@@ -353,7 +378,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
         .limit(limit);
     },
 
-    async create(input: CreateArticleRecord): Promise<ArticleRow> {
+    async create(input: CreateArticleRecord): Promise<ArticleDetailRow> {
       try {
         return await withMediaMutation(db, 'articles', async (tx) => {
           const [created] = await tx
@@ -384,7 +409,12 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
           if (created === undefined) {
             throw new Error('Failed to insert article');
           }
-          return created;
+          const [authorRow] = await tx
+            .select({ displayName: users.displayName })
+            .from(users)
+            .where(eq(users.id, input.authorId))
+            .limit(1);
+          return { ...created, authorName: authorRow?.displayName ?? null };
         });
       } catch (err) {
         if (isUniqueViolation(err)) {
@@ -397,7 +427,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
       }
     },
 
-    async updateById(id: string, patch: UpdateArticleRecord): Promise<ArticleRow | null> {
+    async updateById(id: string, patch: UpdateArticleRecord): Promise<ArticleDetailRow | null> {
       try {
         return await withMediaMutation(db, 'articles', async (tx) => {
           const [updated] = await tx
@@ -408,7 +438,20 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
             })
             .where(eq(articles.id, id))
             .returning();
-          return updated ?? null;
+          if (updated === undefined) {
+            return null;
+          }
+          const authorRow =
+            updated.authorId !== null
+              ? (
+                  await tx
+                    .select({ displayName: users.displayName })
+                    .from(users)
+                    .where(eq(users.id, updated.authorId))
+                    .limit(1)
+                )[0]
+              : undefined;
+          return { ...updated, authorName: authorRow?.displayName ?? null };
         });
       } catch (err) {
         if (isUniqueViolation(err)) {

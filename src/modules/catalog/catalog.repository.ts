@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '@/db/client.ts';
 import { articles } from '@/db/schema/articles.ts';
 import { type CategoryRow, categories, type SpecFieldDefRow } from '@/db/schema/categories.ts';
@@ -57,22 +58,27 @@ export interface SitemapRow {
   readonly updatedAt: Date;
 }
 
+export interface CategoryWithParentRow extends CategoryRow {
+  readonly parentName: string | null;
+  readonly parentSlug: string | null;
+}
+
 export interface CatalogRepository {
   listActive(filter?: {
     readonly query?: string;
     readonly parentId?: string;
     readonly rootOnly?: boolean;
-  }): Promise<readonly CategoryRow[]>;
+  }): Promise<readonly CategoryWithParentRow[]>;
   listAdminCursor(
     params: AdminCategoriesFilter & CursorListParams,
-  ): Promise<readonly CategoryRow[]>;
+  ): Promise<readonly CategoryWithParentRow[]>;
   listAdminOffset(
     params: AdminCategoriesFilter & OffsetListParams,
-  ): Promise<OffsetListResult<CategoryRow>>;
-  findById(id: string): Promise<CategoryRow | null>;
-  findByIds(ids: readonly string[]): Promise<readonly CategoryRow[]>;
-  findActiveBySlug(slug: string): Promise<CategoryRow | null>;
-  listActiveChildren(parentId: string): Promise<readonly CategoryRow[]>;
+  ): Promise<OffsetListResult<CategoryWithParentRow>>;
+  findById(id: string): Promise<CategoryWithParentRow | null>;
+  findByIds(ids: readonly string[]): Promise<readonly CategoryWithParentRow[]>;
+  findActiveBySlug(slug: string): Promise<CategoryWithParentRow | null>;
+  listActiveChildren(parentId: string): Promise<readonly CategoryWithParentRow[]>;
   hasNonDeletedChildren(parentId: string): Promise<boolean>;
   hasAnyChildren(parentId: string): Promise<boolean>;
   hasNonDeletedProducts(categoryId: string): Promise<boolean>;
@@ -87,7 +93,32 @@ export interface CatalogRepository {
 }
 
 export function createCatalogRepository(db: Database): CatalogRepository {
+  const parentCategory = alias(categories, 'parent_category');
   const categorySearchTarget = sql`(${categories.name} || ' ' || ${categories.slug} || ' ' || coalesce(${categories.description}, ''))`;
+
+  const categoryWithParentColumns = {
+    id: categories.id,
+    parentId: categories.parentId,
+    name: categories.name,
+    slug: categories.slug,
+    description: categories.description,
+    metaTitle: categories.metaTitle,
+    metaDescription: categories.metaDescription,
+    focusKeyword: categories.focusKeyword,
+    canonicalUrl: categories.canonicalUrl,
+    noIndex: categories.noIndex,
+    ogImageUrl: categories.ogImageUrl,
+    imageUrl: categories.imageUrl,
+    bannerImageUrl: categories.bannerImageUrl,
+    specSchema: categories.specSchema,
+    sortOrder: categories.sortOrder,
+    isActive: categories.isActive,
+    createdAt: categories.createdAt,
+    updatedAt: categories.updatedAt,
+    deletedAt: categories.deletedAt,
+    parentName: parentCategory.name,
+    parentSlug: parentCategory.slug,
+  } satisfies Record<keyof CategoryWithParentRow, unknown>;
 
   function buildAdminFilterConditions(params: AdminCategoriesFilter): SQL[] {
     const conditions: SQL[] = buildStatusFilterConditions(categories, params.status);
@@ -111,7 +142,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       readonly query?: string;
       readonly parentId?: string;
       readonly rootOnly?: boolean;
-    }): Promise<readonly CategoryRow[]> {
+    }): Promise<readonly CategoryWithParentRow[]> {
       const conditions: SQL[] = activeRecordConditions(categories);
       if (filter?.parentId !== undefined) {
         conditions.push(eq(categories.parentId, filter.parentId));
@@ -127,8 +158,9 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       }
 
       return db
-        .select()
+        .select(categoryWithParentColumns)
         .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
         .where(and(...conditions))
         .orderBy(
           ...(filter?.query !== undefined
@@ -147,7 +179,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       status,
       parentId,
       rootOnly,
-    }): Promise<readonly CategoryRow[]> {
+    }): Promise<readonly CategoryWithParentRow[]> {
       const conditions = buildAdminFilterConditions({
         ...(query !== undefined ? { query } : {}),
         ...(status !== undefined ? { status } : {}),
@@ -160,8 +192,9 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       }
 
       return db
-        .select()
+        .select(categoryWithParentColumns)
         .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(categories.createdAt), desc(categories.id))
         .limit(limit);
@@ -178,8 +211,9 @@ export function createCatalogRepository(db: Database): CatalogRepository {
 
       const [items, countRows] = await Promise.all([
         db
-          .select()
+          .select(categoryWithParentColumns)
           .from(categories)
+          .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
           .where(whereClause)
           .orderBy(desc(categories.createdAt), desc(categories.id))
           .limit(limit)
@@ -193,25 +227,32 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       return { items, total: countRows[0]?.total ?? 0 };
     },
 
-    async findById(id: string): Promise<CategoryRow | null> {
-      const [row] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
+    async findById(id: string): Promise<CategoryWithParentRow | null> {
+      const [row] = await db
+        .select(categoryWithParentColumns)
+        .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
+        .where(eq(categories.id, id))
+        .limit(1);
       return row ?? null;
     },
 
-    async findByIds(ids: readonly string[]): Promise<readonly CategoryRow[]> {
+    async findByIds(ids: readonly string[]): Promise<readonly CategoryWithParentRow[]> {
       if (ids.length === 0) {
         return [];
       }
       return db
-        .select()
+        .select(categoryWithParentColumns)
         .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
         .where(inArray(categories.id, [...ids]));
     },
 
-    async findActiveBySlug(slug: string): Promise<CategoryRow | null> {
+    async findActiveBySlug(slug: string): Promise<CategoryWithParentRow | null> {
       const [row] = await db
-        .select()
+        .select(categoryWithParentColumns)
         .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
         .where(
           and(
             eq(categories.slug, slug),
@@ -223,10 +264,11 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       return row ?? null;
     },
 
-    async listActiveChildren(parentId: string): Promise<readonly CategoryRow[]> {
+    async listActiveChildren(parentId: string): Promise<readonly CategoryWithParentRow[]> {
       return db
-        .select()
+        .select(categoryWithParentColumns)
         .from(categories)
+        .leftJoin(parentCategory, eq(categories.parentId, parentCategory.id))
         .where(
           and(
             eq(categories.parentId, parentId),

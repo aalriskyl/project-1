@@ -181,6 +181,8 @@ export function decodeCursor(rawCursor: string): DecodedCursor {
 }
 
 export interface CursorPageMeta {
+  /** Discriminator: cursor pagination or offset (numbered) pagination. */
+  readonly mode: 'cursor' | 'offset';
   readonly nextCursor: string | null;
   readonly hasMore: boolean;
   readonly limit: number;
@@ -211,6 +213,7 @@ export function buildCursorPage<
   return {
     data: pageItems.map(serialize),
     meta: {
+      mode: 'cursor',
       nextCursor,
       hasMore,
       limit,
@@ -228,6 +231,7 @@ export function buildOffsetPage<T>(
   return {
     data: items,
     meta: {
+      mode: 'offset',
       nextCursor: null,
       hasMore: page < totalPages,
       limit,
@@ -283,9 +287,15 @@ export function createCursorPageSchema<T extends z.ZodType>(itemSchema: T, schem
   return z
     .object({
       success: z.literal(true),
-      message: z.string(),
+      message: z.string().optional().openapi({
+        deprecated: true,
+        description: 'Human-readable summary; prefer the HTTP status',
+      }),
       data: z.array(itemSchema),
       meta: z.object({
+        mode: z.enum(['cursor', 'offset']).openapi({
+          description: 'Pagination mode; offset responses also include page, total and totalPages',
+        }),
         nextCursor: z.string().nullable(),
         hasMore: z.boolean(),
         limit: z.number().int().min(1).max(MAX_PAGE_SIZE),

@@ -68,6 +68,9 @@ jobs:
       - name: Check OpenAPI snapshot
         run: bun run docs:check
 
+      - name: Check Postman exports
+        run: bun run docs:postman:check
+
       - name: Run database migrations against test Postgres
         run: bun run db:migrate
 

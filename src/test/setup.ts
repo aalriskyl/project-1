@@ -10,6 +10,14 @@ process.env['REQUEST_TIMEOUT_MS'] = '5000';
 process.env['RATE_LIMIT_WINDOW_MS'] = '60000';
 process.env['RATE_LIMIT_MAX'] = '100';
 process.env['AUTH_RATE_LIMIT_MAX'] = '10';
+if (
+  process.env['CI'] === 'true' &&
+  (process.env['TEST_DATABASE_URL'] === undefined || process.env['TEST_REDIS_URL'] === undefined)
+) {
+  throw new Error(
+    'CI must provide TEST_DATABASE_URL and TEST_REDIS_URL; otherwise integration suites silently skip',
+  );
+}
 if (process.env['TEST_DATABASE_URL']) {
   const testUrl = new URL(process.env['TEST_DATABASE_URL']);
   if (

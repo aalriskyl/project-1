@@ -34,7 +34,7 @@ describe('CatalogService (unit)', () => {
     const store = createInMemoryDatastore();
     const notifiedTags: string[][] = [];
     const service = createCatalogService(store.catalogRepo, {
-      notify(tags) {
+      async notify(tags) {
         notifiedTags.push([...tags]);
       },
     });
@@ -111,6 +111,45 @@ describe('CatalogService (unit)', () => {
 
     await service.deleteCategory(adminActor, child.id);
     await service.deleteCategory(adminActor, root.id);
+  });
+
+  test('awaits cache invalidation before a mutation resolves', async () => {
+    const store = createInMemoryDatastore();
+    let releaseInvalidation: (() => void) | undefined;
+    const invalidation = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve;
+    });
+    let notified = false;
+    const service = createCatalogService(store.catalogRepo, {
+      notify() {
+        notified = true;
+        return invalidation;
+      },
+    });
+
+    let mutationResolved = false;
+    const mutation = service
+      .createCategory(adminActor, {
+        name: 'Awaited Invalidation',
+        noIndex: false,
+        specSchema: [],
+        sortOrder: 1,
+        isActive: true,
+      })
+      .then((category) => {
+        mutationResolved = true;
+        return category;
+      });
+
+    for (let attempt = 0; attempt < 50 && !notified; attempt += 1) {
+      await Bun.sleep(1);
+    }
+    expect(notified).toBe(true);
+    expect(mutationResolved).toBe(false);
+
+    releaseInvalidation?.();
+    await mutation;
+    expect(mutationResolved).toBe(true);
   });
 });
 
@@ -212,6 +251,14 @@ describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/s
     expect(treeData.data).toHaveLength(1);
     const firstRoot = treeData.data[0];
     expect(firstRoot !== undefined && 'children' in firstRoot && firstRoot.children.length).toBe(1);
+    expect(firstRoot?.parent).toBeNull();
+    if (firstRoot !== undefined && 'children' in firstRoot && Array.isArray(firstRoot.children)) {
+      expect(firstRoot.children[0]?.parent).toEqual({
+        id: rootCreated.data.id,
+        name: 'Alat Cat',
+        slug: 'alat-cat',
+      });
+    }
 
     // Regression H11: contradictory tree=true + rootOnly=false or parentId returns 422
     expect((await testApp.request('/v1/categories?tree=true&rootOnly=false')).status).toBe(422);
@@ -263,6 +310,7 @@ describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/s
     expect(adminPage.meta.total).toBe(2);
     expect(adminPage.meta.totalPages).toBe(2);
     expect(adminPage.meta.hasMore).toBe(true);
+    expect(adminPage.meta.mode).toBe('offset');
 
     // Category filters: ?rootOnly=true, ?parentId=, and mutually exclusive ?rootOnly=true&parentId= -> 422
     const rootOnlyPublic = CategoryListEnvelopeSchema.parse(

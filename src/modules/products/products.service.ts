@@ -170,6 +170,11 @@ export function serializeProductCard(row: ProductCardRow): ProductCard {
   return {
     id: row.id,
     categoryId: row.categoryId,
+    category: {
+      id: row.categoryId,
+      name: row.categoryName,
+      slug: row.categorySlug,
+    },
     brandSlug: row.brandSlug,
     name: row.name,
     slug: row.slug,
@@ -313,6 +318,7 @@ export function createProductsService(
 
   function serializeProductDetail(
     row: ProductRow,
+    category: CategoryRow,
     effectiveSpecSchema: readonly SpecFieldDef[],
     extras?: {
       readonly spareparts?: readonly ProductSparepartLinkItem[];
@@ -320,7 +326,11 @@ export function createProductsService(
     },
   ): ProductDetail {
     return {
-      ...serializeProductCard(row),
+      ...serializeProductCard({
+        ...row,
+        categoryName: category.name,
+        categorySlug: category.slug,
+      }),
       descriptionMd: row.descriptionMd,
       metaTitle: row.metaTitle,
       metaDescription: row.metaDescription,
@@ -368,7 +378,10 @@ export function createProductsService(
       if (query.categorySlug !== undefined) {
         const matchedCat = await catalogRepo.findActiveBySlug(query.categorySlug);
         if (matchedCat === null) {
-          return { data: [], meta: { nextCursor: null, hasMore: false, limit: query.limit } };
+          return {
+            data: [],
+            meta: { mode: 'cursor', nextCursor: null, hasMore: false, limit: query.limit },
+          };
         }
         if (matchedCat.parentId === null) {
           const children = await catalogRepo.listActiveChildren(matchedCat.id);
@@ -379,7 +392,10 @@ export function createProductsService(
       } else if (query.categoryId !== undefined) {
         const matchedCat = await catalogRepo.findById(query.categoryId);
         if (matchedCat === null || !isRecordActive(matchedCat)) {
-          return { data: [], meta: { nextCursor: null, hasMore: false, limit: query.limit } };
+          return {
+            data: [],
+            meta: { mode: 'cursor', nextCursor: null, hasMore: false, limit: query.limit },
+          };
         }
         if (matchedCat.parentId === null) {
           const children = await catalogRepo.listActiveChildren(matchedCat.id);
@@ -438,7 +454,7 @@ export function createProductsService(
           : Promise.resolve(undefined),
       ]);
 
-      return serializeProductDetail(product, schemaInfo.effectiveSpecSchema, {
+      return serializeProductDetail(product, schemaInfo.category, schemaInfo.effectiveSpecSchema, {
         ...(sparepartRows !== undefined
           ? { spareparts: sparepartRows.map(serializeSparepartItem) }
           : {}),
@@ -560,9 +576,13 @@ export function createProductsService(
 
       return {
         specSchema: unionSchema,
-        products: orderedRows.map((row) =>
-          serializeProductDetail(row, schemaByCatId.get(row.categoryId) ?? []),
-        ),
+        products: orderedRows.map((row) => {
+          const category = catById.get(row.categoryId);
+          if (category === undefined) {
+            throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+          }
+          return serializeProductDetail(row, category, schemaByCatId.get(row.categoryId) ?? []);
+        }),
       };
     },
 
@@ -619,6 +639,11 @@ export function createProductsService(
         id: card.id,
         name: card.name,
         slug: card.slug,
+        category: {
+          id: card.categoryId,
+          name: card.categoryName,
+          slug: card.categorySlug,
+        },
         priceIdr: card.priceIdr,
         requiresQuote: card.requiresQuote,
         primaryImageUrl: card.primaryImageUrl,
@@ -670,7 +695,7 @@ export function createProductsService(
         parentProductId: product.id,
         limit: 50,
       });
-      return serializeProductDetail(product, schemaInfo.effectiveSpecSchema, {
+      return serializeProductDetail(product, schemaInfo.category, schemaInfo.effectiveSpecSchema, {
         spareparts: spareparts.map(serializeSparepartItem),
       });
     },
@@ -719,8 +744,8 @@ export function createProductsService(
         weightKg: formatNumericInput(input.weightKg),
       });
 
-      revalidator.notify(['products', `product:${created.slug}`, 'sitemap']);
-      return serializeProductDetail(created, schemaInfo.effectiveSpecSchema);
+      await revalidator.notify(['products', `product:${created.slug}`, 'sitemap']);
+      return serializeProductDetail(created, schemaInfo.category, schemaInfo.effectiveSpecSchema);
     },
 
     async updateProduct(
@@ -799,7 +824,7 @@ export function createProductsService(
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
-      revalidator.notify([
+      await revalidator.notify([
         'products',
         'articles',
         `product:${existing.slug}`,
@@ -807,7 +832,7 @@ export function createProductsService(
         'sitemap',
       ]);
 
-      return serializeProductDetail(updated, schemaInfo.effectiveSpecSchema);
+      return serializeProductDetail(updated, schemaInfo.category, schemaInfo.effectiveSpecSchema);
     },
 
     async deleteProduct(actor: AuthUser, id: string): Promise<void> {
@@ -819,7 +844,7 @@ export function createProductsService(
       }
 
       await productsRepo.softDeleteById(id, existing.deletedAt ?? new Date());
-      revalidator.notify(['products', 'articles', `product:${existing.slug}`, 'sitemap']);
+      await revalidator.notify(['products', 'articles', `product:${existing.slug}`, 'sitemap']);
     },
 
     async replaceProductSpareparts(
@@ -874,7 +899,7 @@ export function createProductsService(
       }
 
       const linked = await productsRepo.replaceSpareparts(productId, body.items);
-      revalidator.notify(['products', `product:${parent.slug}`]);
+      await revalidator.notify(['products', `product:${parent.slug}`]);
       return linked.map(serializeSparepartItem);
     },
   };

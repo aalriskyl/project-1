@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { app } from '@/app.ts';
+import { ERROR_CODES } from '@/lib/errors.ts';
 
 const hasPostmanWorkspace = existsSync('postman/specs/openapi.json');
 
@@ -18,7 +19,11 @@ const RequestSchema = z.object({
 });
 const SpecSchema = z.object({ paths: z.record(z.string(), z.record(z.string(), z.unknown())) });
 
-describe.skipIf(!hasPostmanWorkspace)('Postman contracts', () => {
+describe('Postman contracts', () => {
+  test('requires the checked-in OpenAPI snapshot', () => {
+    expect(hasPostmanWorkspace).toBe(true);
+  });
+
   test('keeps the OpenAPI snapshot synchronized with the application', async () => {
     const generated: unknown = await (await app.request('/v1/openapi.json')).json();
     const saved: unknown = await Bun.file('postman/specs/openapi.json').json();
@@ -68,5 +73,33 @@ describe.skipIf(!hasPostmanWorkspace)('Postman contracts', () => {
     const link = requests.get('collections/Project 1 API/Auth/Link Google Account.request.yaml');
     expect(link?.auth?.type).toBe('bearer');
     expect(link?.auth?.credentials).toEqual([{ key: 'token', value: '{{accessToken}}' }]);
+  });
+
+  test('publishes the error-code enum and marks legacy fields deprecated', async () => {
+    const SchemaComponentsSchema = z.object({
+      components: z.object({
+        schemas: z.record(
+          z.string(),
+          z.object({ properties: z.record(z.string(), z.unknown()).optional() }),
+        ),
+      }),
+    });
+    const spec = SchemaComponentsSchema.parse(await Bun.file('postman/specs/openapi.json').json());
+    const propertiesOf = (schemaName: string): Record<string, unknown> =>
+      spec.components.schemas[schemaName]?.properties ?? {};
+
+    const declaredCodes = z
+      .object({ enum: z.array(z.string()) })
+      .parse(propertiesOf('ErrorResponse')['errorCode']).enum;
+    for (const code of ERROR_CODES) {
+      expect(declaredCodes).toContain(code);
+    }
+
+    const deprecated = (schemaName: string, field: string): true =>
+      z.object({ deprecated: z.literal(true) }).parse(propertiesOf(schemaName)[field]).deprecated;
+    expect(deprecated('RegisterBody', 'name')).toBe(true);
+    expect(deprecated('CreateProductReviewBody', 'orderId')).toBe(true);
+    expect(deprecated('Category', 'isActive')).toBe(true);
+    expect(deprecated('Category', 'deletedAt')).toBe(true);
   });
 });

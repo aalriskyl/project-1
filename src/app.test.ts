@@ -44,7 +44,9 @@ describe('Application core invariants', () => {
     const unsafeIdRes = await testApp.request('/health', {
       headers: { 'X-Request-Id': 'bad id with spaces!' },
     });
-    expect(unsafeIdRes.headers.get('X-Request-Id')).not.toBe('bad id with spaces!');
+    const sanitizedId = unsafeIdRes.headers.get('X-Request-Id') ?? '';
+    expect(sanitizedId).toMatch(/^[a-zA-Z0-9._-]{1,128}$/);
+    expect(sanitizedId).not.toBe('bad id with spaces!');
 
     const readyOk = await testApp.request('/ready');
     expect(readyOk.status).toBe(200);

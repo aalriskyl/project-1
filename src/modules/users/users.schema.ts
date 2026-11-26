@@ -37,9 +37,9 @@ export const UserSchema = z
     phone: z.string().nullable().openapi({ example: '+6281234567890' }),
     address: z.string().nullable().openapi({ example: 'Jl. Pangeran Jayakarta No. 129, Jakarta' }),
     role: z.enum(USER_ROLES).openapi({ example: 'user' }),
-    isActive: z.boolean().openapi({ example: true }),
+    isActive: z.boolean().openapi({ example: true, deprecated: true }),
     status: RecordStatusSchema.openapi({ example: 'active' }),
-    deletedAt: z.iso.datetime().nullable().openapi({ example: null }),
+    deletedAt: z.iso.datetime().nullable().openapi({ example: null, deprecated: true }),
     createdAt: z.iso.datetime().openapi({ example: '2026-11-24T06:00:00.000Z' }),
     updatedAt: z.iso.datetime().openapi({ example: '2026-11-24T06:00:00.000Z' }),
   })

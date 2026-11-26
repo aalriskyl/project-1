@@ -3,7 +3,7 @@ import { type ResponseCache, responseCache } from '@/lib/cache.ts';
 import { logger } from '@/lib/logger.ts';
 
 export interface RevalidateNotifier {
-  notify(tags: readonly string[]): void;
+  notify(tags: readonly string[]): Promise<void>;
 }
 
 export interface NextJsRevalidateConfig {
@@ -25,15 +25,17 @@ export function createNextJsRevalidateNotifier(
   },
 ): RevalidateNotifier {
   return {
-    notify(tags: readonly string[]): void {
+    notify(tags: readonly string[]): Promise<void> {
       const uniqueTags = [...new Set(tags.filter((tag) => tag.length > 0))];
       if (config.url === undefined || uniqueTags.length === 0) {
-        return;
+        return Promise.resolve();
       }
 
       const targetUrl = config.url;
       const timeoutMs = config.timeoutMs ?? REVALIDATE_TIMEOUT_MS;
 
+      // The external webhook is deliberately non-blocking; only local cache invalidation
+      // is awaited by callers so read-after-write never observes stale API responses.
       void fetch(targetUrl, {
         method: 'POST',
         headers: {
@@ -54,6 +56,7 @@ export function createNextJsRevalidateNotifier(
         .catch((err: unknown) => {
           logger.warn({ err, tags: uniqueTags }, 'nextjs revalidate webhook request failed');
         });
+      return Promise.resolve();
     },
   };
 }
@@ -62,18 +65,16 @@ export function createCompositeRevalidateNotifier(
   notifiers: readonly RevalidateNotifier[],
 ): RevalidateNotifier {
   return {
-    notify(tags: readonly string[]): void {
-      for (const notifier of notifiers) {
-        notifier.notify(tags);
-      }
+    async notify(tags: readonly string[]): Promise<void> {
+      await Promise.all(notifiers.map((notifier) => notifier.notify(tags)));
     },
   };
 }
 
 export function createCacheInvalidatingNotifier(cache: ResponseCache): RevalidateNotifier {
   return {
-    notify(tags: readonly string[]): void {
-      void cache.invalidateTags(tags);
+    notify(tags: readonly string[]): Promise<void> {
+      return cache.invalidateTags(tags);
     },
   };
 }

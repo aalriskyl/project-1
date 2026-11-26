@@ -6,6 +6,7 @@ import {
   createCursorPageSchema,
   QueryBooleanSchema,
 } from '@/lib/pagination.ts';
+import { AuthorSummaryRefSchema, ProductSummaryRefSchema } from '@/lib/relations.ts';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { SearchQueryParamSchema } from '@/lib/search.ts';
 import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
@@ -14,15 +15,17 @@ export const ProductReviewSchema = z
   .object({
     id: z.uuid().openapi({ example: '01936c8e-7f2a-7000-8000-000000000601' }),
     productId: z.uuid(),
+    product: ProductSummaryRefSchema,
     userId: z.uuid(),
     authorName: z.string().openapi({ example: 'Budi Santoso' }),
+    author: AuthorSummaryRefSchema,
     orderId: z.uuid().nullable(),
     rating: z.number().int().min(1).max(5).openapi({ example: 5 }),
     comment: z.string().nullable().openapi({ example: 'Mesin halus dan irit solar.' }),
     isPublished: z.boolean(),
-    isActive: z.boolean(),
+    isActive: z.boolean().openapi({ deprecated: true }),
     status: RecordStatusSchema,
-    deletedAt: z.iso.datetime().nullable(),
+    deletedAt: z.iso.datetime().nullable().openapi({ deprecated: true }),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -101,6 +104,7 @@ export const CreateProductReviewBodySchema = z
     comment: z.string().trim().max(2_000).nullable().optional(),
     orderId: z.null().optional().openapi({
       description: 'Reserved for future server-verified purchases. Omit or send null.',
+      deprecated: true,
     }),
   })
   .openapi('CreateProductReviewBody');

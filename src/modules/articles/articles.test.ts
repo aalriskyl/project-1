@@ -52,7 +52,7 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
       catalogService: createCatalogService(store.catalogRepo),
       articlesService: createArticlesService(store.articlesRepo, {
         revalidator: {
-          notify(tags) {
+          async notify(tags) {
             revalidated.push([...tags]);
           },
         },
@@ -105,6 +105,7 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
     expect(draft.data.slug).toBe('mesin-potong-aspal-fungsi-dan-spesifikasi');
     expect(draft.data.tags).toEqual(['konstruksi', 'cutting']);
     expect(draft.data.publishedAt).toBeNull();
+    expect(draft.data.author).toEqual({ id: adminActor.id, name: 'SEO Admin' });
 
     // Draft must NOT be visible publicly or in sitemap
     const publicDraftRes = await testApp.request(`/v1/articles/${draft.data.slug}`);

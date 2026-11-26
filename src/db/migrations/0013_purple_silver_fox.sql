@@ -31,4 +31,8 @@ ALTER TABLE "users" ADD COLUMN "token_version" integer DEFAULT 1 NOT NULL;--> st
 CREATE INDEX "mail_outbox_pending_idx" ON "mail_outbox" USING btree ("next_attempt_at") WHERE "mail_outbox"."finished_at" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "product_reviews_user_product_no_order_uidx" ON "product_reviews" USING btree ("user_id","product_id") WHERE "product_reviews"."order_id" is null and "product_reviews"."deleted_at" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "product_reviews_order_product_uidx" ON "product_reviews" USING btree ("order_id","product_id") WHERE "product_reviews"."order_id" is not null and "product_reviews"."deleted_at" is null;--> statement-breakpoint
-ALTER TABLE "articles" ADD CONSTRAINT "articles_published_at_present_chk" CHECK ("articles"."is_published" = false or "articles"."published_at" is not null);
+-- Add NOT VALID first so a single legacy inconsistent row cannot roll back the entire
+-- migration, then repair those rows (updated_at is NOT NULL) and validate the constraint.
+ALTER TABLE "articles" ADD CONSTRAINT "articles_published_at_present_chk" CHECK ("articles"."is_published" = false or "articles"."published_at" is not null) NOT VALID;--> statement-breakpoint
+UPDATE "articles" SET "published_at" = "updated_at" WHERE "is_published" = true AND "published_at" is null;--> statement-breakpoint
+ALTER TABLE "articles" VALIDATE CONSTRAINT "articles_published_at_present_chk";

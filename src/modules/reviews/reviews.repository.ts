@@ -23,6 +23,8 @@ import type {
 
 export interface ProductReviewWithAuthorRow extends SoftDeletableEntity {
   readonly productId: string;
+  readonly productName: string;
+  readonly productSlug: string;
   readonly userId: string;
   readonly authorName: string;
   readonly orderId: string | null;
@@ -88,6 +90,8 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
   const selectShape = {
     id: productReviews.id,
     productId: productReviews.productId,
+    productName: products.name,
+    productSlug: products.slug,
     userId: productReviews.userId,
     authorName: users.displayName,
     orderId: productReviews.orderId,
@@ -98,7 +102,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
     createdAt: productReviews.createdAt,
     updatedAt: productReviews.updatedAt,
     deletedAt: productReviews.deletedAt,
-  };
+  } satisfies Record<keyof ProductReviewWithAuthorRow, unknown>;
 
   async function recomputeProductRatingTx(
     tx: Parameters<Parameters<Database['transaction']>[0]>[0],
@@ -186,6 +190,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         .select(selectShape)
         .from(productReviews)
         .innerJoin(users, eq(productReviews.userId, users.id))
+        .innerJoin(products, eq(productReviews.productId, products.id))
         .where(and(...conditions))
         .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
         .limit(limit);
@@ -226,6 +231,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         .select(selectShape)
         .from(productReviews)
         .innerJoin(users, eq(productReviews.userId, users.id))
+        .innerJoin(products, eq(productReviews.productId, products.id))
         .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
         .limit(limit);
@@ -260,6 +266,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .select(selectShape)
           .from(productReviews)
           .innerJoin(users, eq(productReviews.userId, users.id))
+          .innerJoin(products, eq(productReviews.productId, products.id))
           .where(whereClause)
           .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
           .limit(limit)
@@ -268,6 +275,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .select({ total: sql<number>`count(*)::int` })
           .from(productReviews)
           .innerJoin(users, eq(productReviews.userId, users.id))
+          .innerJoin(products, eq(productReviews.productId, products.id))
           .where(whereClause),
       ]);
 
@@ -309,6 +317,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
             .select(selectShape)
             .from(productReviews)
             .innerJoin(users, eq(productReviews.userId, users.id))
+            .innerJoin(products, eq(productReviews.productId, products.id))
             .where(eq(productReviews.id, input.id))
             .limit(1);
 
@@ -376,6 +385,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .select(selectShape)
           .from(productReviews)
           .innerJoin(users, eq(productReviews.userId, users.id))
+          .innerJoin(products, eq(productReviews.productId, products.id))
           .where(eq(productReviews.id, updated.id))
           .limit(1);
 
@@ -499,6 +509,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
             .select(selectShape)
             .from(productReviews)
             .innerJoin(users, eq(productReviews.userId, users.id))
+            .innerJoin(products, eq(productReviews.productId, products.id))
             .where(eq(productReviews.id, reviewId))
             .limit(1);
 

@@ -285,6 +285,7 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     );
     expect(priceAscP1.data.map((p) => p.priceIdr)).toEqual([285_000, 177_500_000]);
     expect(priceAscP1.meta.hasMore).toBe(true);
+    expect(priceAscP1.meta.mode).toBe('cursor');
 
     const priceAscP2 = ProductCursorPageSchema.parse(
       await (
@@ -330,6 +331,18 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
       await (await testApp.request('/v1/products?inStock=true')).json(),
     );
     expect(inStockRes.data).toHaveLength(3);
+    expect(inStockRes.data[0]?.category.id).toBe(inStockRes.data[0]?.categoryId);
+    expect(inStockRes.data[0]?.category.name.length).toBeGreaterThan(0);
+
+    const adminProdsWithCat = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/products', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminProdsWithCat.data[0]?.category.id).toBe(adminProdsWithCat.data[0]?.categoryId);
+    expect(adminProdsWithCat.data[0]?.category.slug.length).toBeGreaterThan(0);
 
     const minRatingRes = ProductCursorPageSchema.parse(
       await (await testApp.request('/v1/products?minRating=4')).json(),

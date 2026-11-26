@@ -41,6 +41,8 @@ services:
       timeout: 5s
       retries: 5
 
+  # Development-only convenience stack. Do not use as a production deployment
+  # template: production must set NODE_ENV=production and satisfy env.ts checks.
   api:
     build:
       context: .

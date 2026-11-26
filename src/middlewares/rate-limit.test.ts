@@ -28,7 +28,7 @@ describe('Rate-limit client identity', () => {
       { clientIp: '203.0.113.1' },
     );
     expect(blocked.status).toBe(429);
-    expect(blocked.headers.get('Retry-After')).not.toBeNull();
+    expect(Number(blocked.headers.get('Retry-After'))).toBeGreaterThan(0);
     expect((await app.request('/', {}, { clientIp: '203.0.113.2' })).status).toBe(200);
   });
   test('accepts overwritten X-Real-IP only from a configured proxy', async () => {

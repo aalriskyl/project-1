@@ -100,6 +100,12 @@ Content writes and cleanup claims share a short database advisory lock. Indexed 
 
 ### Rollout and compatibility
 
+Migration `0013_purple_silver_fox.sql` changes timestamp precision with `ALTER COLUMN ... SET DATA TYPE` on several populated tables. PostgreSQL rewrites those tables under an `ACCESS EXCLUSIVE` lock for the duration of the migration transaction, so apply it during a maintenance window on existing environments (fresh installs are unaffected by data volume). The accompanying `articles_published_at_present_chk` is added `NOT VALID`, legacy published rows without `published_at` are backfilled from `updated_at`, and the constraint is then validated, so one inconsistent legacy row cannot abort the whole migration.
+
+Index `CREATE`/`DROP` statements in the migrations are not `CONCURRENTLY` because drizzle-kit's migrator wraps each migration in a transaction. On large populated tables, schedule those steps separately outside the migrator.
+
+Media lifecycle writes deliberately share one advisory lock key: `claimOrphans` must wait for every in-flight attachment write before deciding an upload is unreferenced. This serializes attachment commits across owners and replicas. If cleanup throughput becomes a bottleneck, redesign cleanup as a two-phase scan with per-owner locks and a recheck rather than simply narrowing the lock.
+
 These are security-related behavior changes within v1: Google email matching no longer auto-links accounts; unverified new media attachments return 409; non-null review `orderId` values return 422; cleanup requires at least three hours. Update clients and Postman before rollout.
 
 Apply the generated schema and reference-backfill migrations before deploying this version. Keep production `MEDIA_CLEANUP_ENABLED=false`. Drain all older API replicas, rerun the idempotent statements in `0007_media_reference_backfill.sql` through your controlled migration/rollout process if old replicas wrote during deployment, and verify references before enabling cleanup. Do not set legacy uploads to verified without checking Storage. Never roll back to an application version that bypasses attachment checks while cleanup is enabled.
@@ -119,6 +125,8 @@ Keep the encryption key stable while pending jobs exist; changing it without dra
 ## Reviews and rich text
 
 Reviews currently require authentication and allow one review per user/product. They are immediately published and can be moderated by admins. They are **not verified purchases**: omit `orderId` or send null until an orders module can verify ownership, completion, and line items. Review mutations lock the product before changing reviews and recomputing rating totals.
+
+`articles.related_product_ids` is a plain UUID array without a foreign key. Public article responses filter IDs whose product no longer resolves; admin responses retain them for inspection. Normalizing these links into a join table with a real FK is the durable fix.
 
 Markdown storage does not make rendering automatically safe. The frontend must disable raw HTML or sanitize rendered HTML, reject unsafe URL schemes, and avoid rendering untrusted content with an unsanitized HTML sink. No frontend renderer is included in this repository.
 

@@ -222,7 +222,8 @@ export function createApp(deps: AppDependencies = {}) {
     authMiddleware,
   });
 
-  application.use('/ready', globalRateLimiter);
+  // Readiness/liveness probes must never be rate-limited: a 429 would make the
+  // orchestrator drain a healthy replica and amplify an incident.
   application.use('/v1/openapi.json', globalRateLimiter);
 
   const routes = application

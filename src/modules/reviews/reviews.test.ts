@@ -193,6 +193,7 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     expect(adminUnpubList.data).toHaveLength(1);
     expect(adminUnpubList.meta.total).toBe(1);
     expect(adminUnpubList.meta.totalPages).toBe(1);
+    expect(adminUnpubList.meta.mode).toBe('offset');
 
     // Admin soft-deletes Buyer 1's review -> status='inactive', ratingAvg resets to 0, reviewCount = 0
     const delRes = await testApp.request(`/v1/admin/reviews/${rev1.id}`, {
@@ -246,6 +247,8 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     const editedOwn = ProductReviewEnvelopeSchema.parse(await editOwnRes.json()).data;
     expect(editedOwn.rating).toBe(3);
     expect(editedOwn.comment).toBe('Updated after heavy usage.');
+    expect(editedOwn.product).toEqual({ id: prod.id, name: prod.name, slug: prod.slug });
+    expect(editedOwn.author).toEqual({ id: buyer1.id, name: 'Budi Santoso' });
 
     const prodAfterOwnEdit = ProductDetailEnvelopeSchema.parse(
       await (await testApp.request(`/v1/products/${prod.slug}`)).json(),

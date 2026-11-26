@@ -11,6 +11,7 @@ import { ConflictError, NotFoundError } from '@/lib/errors.ts';
 import { matchesFuzzyInMemory } from '@/lib/search.ts';
 import { isRecordActive, type RecordStatus } from '@/lib/status.ts';
 import type {
+  ArticleDetailRow,
   ArticlesRepository,
   ArticleSummaryRow,
 } from '@/modules/articles/articles.repository.ts';
@@ -20,7 +21,10 @@ import type {
   RefreshTokenEntity,
   RefreshTokenWithUser,
 } from '@/modules/auth/auth.repository.ts';
-import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
+import type {
+  CatalogRepository,
+  CategoryWithParentRow,
+} from '@/modules/catalog/catalog.repository.ts';
 import type { MediaRepository } from '@/modules/media/media.repository.ts';
 import type {
   ProductCardRow,
@@ -149,10 +153,33 @@ function toPublicEntity(stored: StoredUser): UserEntity {
   };
 }
 
-function toArticleSummary(row: ArticleRow): ArticleSummaryRow {
-  return {
+export function createInMemoryDatastore(): InMemoryDatastore {
+  const usersById = new Map<string, StoredUser>();
+  const tokensById = new Map<string, RefreshTokenEntity>();
+  const resetTokensById = new Map<string, PasswordResetTokenRow>();
+  const categoriesById = new Map<string, CategoryRow>();
+  const productsById = new Map<string, ProductRow>();
+  const sparepartsByParent = new Map<
+    string,
+    { readonly sparepartProductId: string; readonly note: string | null }[]
+  >();
+  const reviewsById = new Map<string, ProductReviewRow>();
+  const articlesById = new Map<string, ArticleRow>();
+  const mediaUploadsById = new Map<string, MediaUploadRow>();
+
+  const toCategoryWithParent = (row: CategoryRow): CategoryWithParentRow => {
+    const parent = row.parentId !== null ? (categoriesById.get(row.parentId) ?? null) : null;
+    return {
+      ...row,
+      parentName: parent?.name ?? null,
+      parentSlug: parent?.slug ?? null,
+    };
+  };
+
+  const toArticleSummary = (row: ArticleRow): ArticleSummaryRow => ({
     id: row.id,
     authorId: row.authorId,
+    authorName: row.authorId !== null ? (usersById.get(row.authorId)?.displayName ?? null) : null,
     title: row.title,
     slug: row.slug,
     excerpt: row.excerpt,
@@ -170,45 +197,43 @@ function toArticleSummary(row: ArticleRow): ArticleSummaryRow {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
-  };
-}
+  });
 
-function toProductCardRow(row: ProductRow): ProductCardRow {
-  return {
-    id: row.id,
-    categoryId: row.categoryId,
-    brandSlug: row.brandSlug,
-    name: row.name,
-    slug: row.slug,
-    sku: row.sku,
-    productType: row.productType,
-    priceIdr: row.priceIdr,
-    requiresQuote: row.requiresQuote,
-    stock: row.stock,
-    isFeatured: row.isFeatured,
-    isActive: row.isActive,
-    deletedAt: row.deletedAt,
-    primaryImageUrl: row.primaryImageUrl,
-    ratingAvg: row.ratingAvg,
-    reviewCount: row.reviewCount,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
+  const toArticleDetail = (row: ArticleRow): ArticleDetailRow => ({
+    ...row,
+    authorName: row.authorId !== null ? (usersById.get(row.authorId)?.displayName ?? null) : null,
+  });
 
-export function createInMemoryDatastore(): InMemoryDatastore {
-  const usersById = new Map<string, StoredUser>();
-  const tokensById = new Map<string, RefreshTokenEntity>();
-  const resetTokensById = new Map<string, PasswordResetTokenRow>();
-  const categoriesById = new Map<string, CategoryRow>();
-  const productsById = new Map<string, ProductRow>();
-  const sparepartsByParent = new Map<
-    string,
-    { readonly sparepartProductId: string; readonly note: string | null }[]
-  >();
-  const reviewsById = new Map<string, ProductReviewRow>();
-  const articlesById = new Map<string, ArticleRow>();
-  const mediaUploadsById = new Map<string, MediaUploadRow>();
+  const toProductCardRow = (row: ProductRow): ProductCardRow => {
+    const category = categoriesById.get(row.categoryId);
+    return {
+      id: row.id,
+      categoryId: row.categoryId,
+      categoryName: category?.name ?? '',
+      categorySlug: category?.slug ?? '',
+      brandSlug: row.brandSlug,
+      name: row.name,
+      slug: row.slug,
+      sku: row.sku,
+      productType: row.productType,
+      priceIdr: row.priceIdr,
+      requiresQuote: row.requiresQuote,
+      stock: row.stock,
+      isFeatured: row.isFeatured,
+      isActive: row.isActive,
+      deletedAt: row.deletedAt,
+      primaryImageUrl: row.primaryImageUrl,
+      ratingAvg: row.ratingAvg,
+      reviewCount: row.reviewCount,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  };
+
+  // Mirror the real repositories' innerJoin(categories): a product whose parent
+  // category is absent must disappear from results, not appear with an empty label.
+  const toProductCardRows = (rows: readonly ProductRow[]): ProductCardRow[] =>
+    rows.flatMap((row) => (categoriesById.has(row.categoryId) ? [toProductCardRow(row)] : []));
 
   const assertMediaAttachments = (row: unknown): void => {
     if (env.SUPABASE_URL === undefined) return;
@@ -665,7 +690,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     );
 
   const catalogRepo: CatalogRepository = {
-    listActive(filter): Promise<readonly CategoryRow[]> {
+    listActive(filter): Promise<readonly CategoryWithParentRow[]> {
       const active = [...categoriesById.values()].filter((row) => {
         if (!isRecordActive(row)) return false;
         if (filter?.parentId !== undefined && row.parentId !== filter.parentId) return false;
@@ -681,7 +706,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         }
         return true;
       });
-      return Promise.resolve(sortCategories(active));
+      return Promise.resolve(sortCategories(active).map(toCategoryWithParent));
     },
 
     listAdminCursor({
@@ -691,7 +716,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       status,
       parentId,
       rootOnly,
-    }): Promise<readonly CategoryRow[]> {
+    }): Promise<readonly CategoryWithParentRow[]> {
       const sorted = [...categoriesById.values()]
         .filter((row) => {
           if (!matchesStatusFilter(row, status)) return false;
@@ -712,7 +737,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
       const filtered = applyDescCursor(sorted, cursor, (r) => r.createdAt);
 
-      return Promise.resolve(filtered.slice(0, limit));
+      return Promise.resolve(filtered.slice(0, limit).map(toCategoryWithParent));
     },
 
     listAdminOffset({ limit, offset, query, status, parentId, rootOnly }) {
@@ -735,39 +760,39 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         .sort(compareCreatedAtDesc);
 
       return Promise.resolve({
-        items: sorted.slice(offset, offset + limit),
+        items: sorted.slice(offset, offset + limit).map(toCategoryWithParent),
         total: sorted.length,
       });
     },
 
-    findById(id: string): Promise<CategoryRow | null> {
+    findById(id: string): Promise<CategoryWithParentRow | null> {
       const found = categoriesById.get(id);
-      return Promise.resolve(found ?? null);
+      return Promise.resolve(found !== undefined ? toCategoryWithParent(found) : null);
     },
 
-    findByIds(ids: readonly string[]): Promise<readonly CategoryRow[]> {
+    findByIds(ids: readonly string[]): Promise<readonly CategoryWithParentRow[]> {
       return Promise.resolve(
         ids.flatMap((id) => {
           const found = categoriesById.get(id);
-          return found !== undefined ? [found] : [];
+          return found !== undefined ? [toCategoryWithParent(found)] : [];
         }),
       );
     },
 
-    findActiveBySlug(slug: string): Promise<CategoryRow | null> {
+    findActiveBySlug(slug: string): Promise<CategoryWithParentRow | null> {
       for (const row of categoriesById.values()) {
         if (row.slug === slug && isRecordActive(row)) {
-          return Promise.resolve(row);
+          return Promise.resolve(toCategoryWithParent(row));
         }
       }
       return Promise.resolve(null);
     },
 
-    listActiveChildren(parentId: string): Promise<readonly CategoryRow[]> {
+    listActiveChildren(parentId: string): Promise<readonly CategoryWithParentRow[]> {
       const children = [...categoriesById.values()].filter(
         (row) => row.parentId === parentId && isRecordActive(row),
       );
-      return Promise.resolve(sortCategories(children));
+      return Promise.resolve(sortCategories(children).map(toCategoryWithParent));
     },
 
     hasNonDeletedChildren(parentId: string): Promise<boolean> {
@@ -987,7 +1012,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
             })
           : sorted;
 
-      return Promise.resolve(afterCursor.slice(0, filter.limit).map(toProductCardRow));
+      return Promise.resolve(toProductCardRows(afterCursor.slice(0, filter.limit)));
     },
 
     listAdminCursor({
@@ -1038,7 +1063,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
               return rMs < cMs || (rMs === cMs && r.id < cursor.id);
             })
           : sorted;
-      return Promise.resolve(filtered.slice(0, limit).map(toProductCardRow));
+      return Promise.resolve(toProductCardRows(filtered.slice(0, limit)));
     },
 
     listAdminOffset({
@@ -1081,9 +1106,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           return true;
         }),
       );
+      const visible = toProductCardRows(sorted);
       return Promise.resolve({
-        items: sorted.slice(offset, offset + limit).map(toProductCardRow),
-        total: sorted.length,
+        items: visible.slice(offset, offset + limit),
+        total: visible.length,
       });
     },
 
@@ -1119,7 +1145,9 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(
         ids.flatMap((id) => {
           const r = productsById.get(id);
-          return r !== undefined && isRecordActive(r) ? [toProductCardRow(r)] : [];
+          return r !== undefined && isRecordActive(r) && categoriesById.has(r.categoryId)
+            ? [toProductCardRow(r)]
+            : [];
         }),
       );
     },
@@ -1145,7 +1173,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           if (a.isFeatured !== b.isFeatured) return a.isFeatured ? -1 : 1;
           return b.createdAt.getTime() - a.createdAt.getTime();
         });
-      return Promise.resolve(rows.slice(0, limit).map(toProductCardRow));
+      return Promise.resolve(toProductCardRows(rows.slice(0, limit)));
     },
 
     listSparepartsCursor({
@@ -1158,7 +1186,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       const joined: ProductSparepartCardRow[] = [];
       for (const link of links) {
         const sp = productsById.get(link.sparepartProductId);
-        if (sp !== undefined && isRecordActive(sp)) {
+        if (sp !== undefined && isRecordActive(sp) && categoriesById.has(sp.categoryId)) {
           if (
             query !== undefined &&
             !matchesFuzzyInMemory([sp.name, sp.sku, sp.brandSlug, sp.descriptionMd], query)
@@ -1314,20 +1342,31 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     },
   };
 
-  const toReviewWithAuthor = (row: ProductReviewRow): ProductReviewWithAuthorRow => ({
-    id: row.id,
-    productId: row.productId,
-    userId: row.userId,
-    authorName: usersById.get(row.userId)?.displayName ?? 'Customer',
-    orderId: row.orderId,
-    rating: row.rating,
-    comment: row.comment,
-    isPublished: row.isPublished,
-    isActive: row.isActive,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    deletedAt: row.deletedAt,
-  });
+  const toReviewWithAuthor = (row: ProductReviewRow): ProductReviewWithAuthorRow => {
+    const product = productsById.get(row.productId);
+    return {
+      id: row.id,
+      productId: row.productId,
+      productName: product?.name ?? '',
+      productSlug: product?.slug ?? '',
+      userId: row.userId,
+      authorName: usersById.get(row.userId)?.displayName ?? 'Customer',
+      orderId: row.orderId,
+      rating: row.rating,
+      comment: row.comment,
+      isPublished: row.isPublished,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt,
+    };
+  };
+
+  // Mirror innerJoin(products): reviews whose product is gone must not surface in lists.
+  const toReviewWithAuthorRows = (
+    rows: readonly ProductReviewRow[],
+  ): ProductReviewWithAuthorRow[] =>
+    rows.flatMap((row) => (productsById.has(row.productId) ? [toReviewWithAuthor(row)] : []));
 
   const reviewsRepo: ReviewsRepository = {
     listPublishedByProductCursor({ productId, limit, cursor, rating }) {
@@ -1341,7 +1380,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
       const filtered = applyDescCursor(published, cursor, (r) => r.createdAt);
 
-      return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
+      return Promise.resolve(toReviewWithAuthorRows(filtered.slice(0, limit)));
     },
 
     listAdminCursor({
@@ -1376,7 +1415,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
       const filtered = applyDescCursor(matched, cursor, (r) => r.createdAt);
 
-      return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
+      return Promise.resolve(toReviewWithAuthorRows(filtered.slice(0, limit)));
     },
 
     listAdminOffset({
@@ -1409,9 +1448,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         })
         .sort(compareCreatedAtDesc);
 
+      const visible = toReviewWithAuthorRows(matched);
       return Promise.resolve({
-        items: matched.slice(offset, offset + limit).map(toReviewWithAuthor),
-        total: matched.length,
+        items: visible.slice(offset, offset + limit),
+        total: visible.length,
       });
     },
 
@@ -1676,18 +1716,18 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       });
     },
 
-    findPublishedBySlug(slug): Promise<ArticleRow | null> {
+    findPublishedBySlug(slug): Promise<ArticleDetailRow | null> {
       for (const row of articlesById.values()) {
         if (row.slug === slug && row.isPublished && isRecordActive(row)) {
-          return Promise.resolve(row);
+          return Promise.resolve(toArticleDetail(row));
         }
       }
       return Promise.resolve(null);
     },
 
-    findById(id): Promise<ArticleRow | null> {
+    findById(id): Promise<ArticleDetailRow | null> {
       const row = articlesById.get(id);
-      return Promise.resolve(row ?? null);
+      return Promise.resolve(row !== undefined ? toArticleDetail(row) : null);
     },
 
     findRelatedPublished({ excludeId, tags, limit }): Promise<readonly ArticleSummaryRow[]> {
@@ -1699,7 +1739,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve([...tagMatches, ...rest].slice(0, limit).map(toArticleSummary));
     },
 
-    create(input): Promise<ArticleRow> {
+    create(input): Promise<ArticleDetailRow> {
       for (const existing of articlesById.values()) {
         if (existing.deletedAt === null && existing.slug === input.slug) {
           return Promise.reject(
@@ -1733,10 +1773,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       };
       assertMediaAttachments(created);
       articlesById.set(created.id, created);
-      return Promise.resolve(created);
+      return Promise.resolve(toArticleDetail(created));
     },
 
-    updateById(id, patch): Promise<ArticleRow | null> {
+    updateById(id, patch): Promise<ArticleDetailRow | null> {
       const existing = articlesById.get(id);
       if (existing === undefined) {
         return Promise.resolve(null);
@@ -1777,7 +1817,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       };
       assertMediaAttachments(updated);
       articlesById.set(id, updated);
-      return Promise.resolve(updated);
+      return Promise.resolve(toArticleDetail(updated));
     },
 
     softDeleteById(id, deletedAt): Promise<boolean> {

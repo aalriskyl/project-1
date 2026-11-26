@@ -406,6 +406,6 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
       body: JSON.stringify({ email: 'ada@example.com', password: 'password' }),
     });
     expect(thirdRes.status).toBe(429);
-    expect(thirdRes.headers.get('Retry-After')).not.toBeNull();
+    expect(Number(thirdRes.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 });

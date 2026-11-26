@@ -94,9 +94,19 @@ describe('Storage boundary validation', () => {
     expect(matchesImageSignature(new TextEncoder().encode('RIFF0000WEBP'), 'image/webp')).toBe(
       true,
     );
-    expect(matchesImageSignature(new TextEncoder().encode('0000ftypavif'), 'image/avif')).toBe(
-      true,
-    );
+    const encoder = new TextEncoder();
+    const avif = new Uint8Array(24);
+    avif.set([0, 0, 0, 24], 0); // ftyp box size
+    avif.set(encoder.encode('ftypavif'), 4);
+    avif.set(encoder.encode('mif1'), 16);
+    expect(matchesImageSignature(avif, 'image/avif')).toBe(true);
+
+    // An `avif` literal outside the declared ftyp box must not pass as AVIF.
+    const forgedAvif = new Uint8Array(24);
+    forgedAvif.set([0, 0, 0, 16], 0);
+    forgedAvif.set(encoder.encode('ftypisom'), 4);
+    forgedAvif.set(encoder.encode('avif'), 16);
+    expect(matchesImageSignature(forgedAvif, 'image/avif')).toBe(false);
   });
   test('ignores malformed prose URLs and rejects bucket traversal', () => {
     const urls = [

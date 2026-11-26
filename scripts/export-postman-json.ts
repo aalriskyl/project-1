@@ -319,9 +319,28 @@ const v2Env = {
 const collectionOutPath = 'postman/exports/project-1-api.postman_collection.json';
 const envOutPath = 'postman/exports/local.postman_environment.json';
 
-await Bun.write(collectionOutPath, JSON.stringify(v2Collection, null, 2) + '\n');
-await Bun.write(envOutPath, JSON.stringify(v2Env, null, 2) + '\n');
+const collectionJson = JSON.stringify(v2Collection, null, 2) + '\n';
+const envJson = JSON.stringify(v2Env, null, 2) + '\n';
 
-console.log(
-  `Exported ${requestCount} requests -> ${collectionOutPath} and ${parsedEnv.values.length} env vars -> ${envOutPath}`,
-);
+if (process.argv.includes('--check')) {
+  for (const [outputPath, expected] of [
+    [collectionOutPath, collectionJson],
+    [envOutPath, envJson],
+  ] as const) {
+    const snapshot = Bun.file(outputPath);
+    if (!(await snapshot.exists())) {
+      throw new Error(`${outputPath} is missing; run bun run docs:postman`);
+    }
+    const current = (await snapshot.text()).replaceAll('\r\n', '\n');
+    if (current !== expected) {
+      throw new Error(`${outputPath} is stale; run bun run docs:postman`);
+    }
+  }
+  console.log('Postman exports are up to date');
+} else {
+  await Bun.write(collectionOutPath, collectionJson);
+  await Bun.write(envOutPath, envJson);
+  console.log(
+    `Exported ${requestCount} requests -> ${collectionOutPath} and ${parsedEnv.values.length} env vars -> ${envOutPath}`,
+  );
+}

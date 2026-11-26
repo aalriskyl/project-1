@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import type { CategoryRow, SpecFieldDefRow } from '@/db/schema/categories.ts';
+import type { SpecFieldDefRow } from '@/db/schema/categories.ts';
 import { noopCache, type ResponseCache } from '@/lib/cache.ts';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
@@ -8,7 +8,10 @@ import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts
 import { slugify } from '@/lib/slug.ts';
 import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
-import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
+import type {
+  CatalogRepository,
+  CategoryWithParentRow,
+} from '@/modules/catalog/catalog.repository.ts';
 import {
   type CategoryDetail,
   CategorySchema,
@@ -69,10 +72,16 @@ function serializeSpecField(field: SpecFieldDefRow): SpecFieldDef {
   };
 }
 
-export function serializeCategory(row: CategoryRow): PublicCategory {
+export function serializeCategory(row: CategoryWithParentRow): PublicCategory {
+  const parent =
+    row.parentId !== null && row.parentName !== null && row.parentSlug !== null
+      ? { id: row.parentId, name: row.parentName, slug: row.parentSlug }
+      : null;
+
   return {
     id: row.id,
     parentId: row.parentId,
+    parent,
     name: row.name,
     slug: row.slug,
     description: row.description,
@@ -122,9 +131,9 @@ export function createCatalogService(
   async function validateParentAssignment(
     parentId: string | null | undefined,
     selfId?: string,
-  ): Promise<void> {
+  ): Promise<CategoryWithParentRow | null> {
     if (parentId === undefined || parentId === null) {
-      return;
+      return null;
     }
 
     if (selfId !== undefined && parentId === selfId) {
@@ -154,6 +163,8 @@ export function createCatalogService(
         );
       }
     }
+
+    return parent;
   }
 
   return {
@@ -355,7 +366,7 @@ export function createCatalogService(
 
     async createCategory(actor: AuthUser, input: CreateCategoryBody): Promise<PublicCategory> {
       assertAdminUser(actor);
-      await validateParentAssignment(input.parentId);
+      const parent = await validateParentAssignment(input.parentId);
 
       const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.name, 140);
@@ -379,8 +390,12 @@ export function createCatalogService(
         deletedAt: resolvedActive ? null : new Date(),
       });
 
-      revalidator.notify(['categories', `category:${created.slug}`, 'sitemap']);
-      return serializeCategory(created);
+      await revalidator.notify(['categories', `category:${created.slug}`, 'sitemap']);
+      return serializeCategory({
+        ...created,
+        parentName: parent?.name ?? null,
+        parentSlug: parent?.slug ?? null,
+      });
     },
 
     async updateCategory(
@@ -398,11 +413,12 @@ export function createCatalogService(
       const nextActive = resolveActiveStateInput(input);
       const effectiveParentId = input.parentId !== undefined ? input.parentId : existing.parentId;
       const willBeActive = nextActive ?? isRecordActive(existing);
+      let validatedParent: CategoryWithParentRow | null | undefined;
       if (
         input.parentId !== undefined ||
         (willBeActive && !isRecordActive(existing) && effectiveParentId !== null)
       ) {
-        await validateParentAssignment(effectiveParentId, id);
+        validatedParent = await validateParentAssignment(effectiveParentId, id);
       }
 
       if (nextActive === false) {
@@ -454,14 +470,20 @@ export function createCatalogService(
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
 
-      revalidator.notify([
+      await revalidator.notify([
         'categories',
         `category:${existing.slug}`,
         `category:${updated.slug}`,
         'sitemap',
       ]);
 
-      return serializeCategory(updated);
+      return serializeCategory({
+        ...updated,
+        parentName:
+          validatedParent !== undefined ? (validatedParent?.name ?? null) : existing.parentName,
+        parentSlug:
+          validatedParent !== undefined ? (validatedParent?.slug ?? null) : existing.parentSlug,
+      });
     },
 
     async deleteCategory(actor: AuthUser, id: string): Promise<void> {
@@ -490,7 +512,7 @@ export function createCatalogService(
       }
 
       await catalogRepo.softDeleteById(id, existing.deletedAt ?? new Date());
-      revalidator.notify(['categories', `category:${existing.slug}`, 'sitemap']);
+      await revalidator.notify(['categories', `category:${existing.slug}`, 'sitemap']);
     },
   };
 }

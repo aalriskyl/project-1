@@ -1,4 +1,3 @@
-import type { ArticleRow } from '@/db/schema/articles.ts';
 import { NotFoundError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import {
@@ -13,6 +12,7 @@ import { slugify } from '@/lib/slug.ts';
 import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type {
+  ArticleDetailRow,
   ArticlesRepository,
   ArticleSummaryRow,
 } from '@/modules/articles/articles.repository.ts';
@@ -53,6 +53,10 @@ export function serializeArticleSummary(row: ArticleSummaryRow): ArticleSummary 
   return {
     id: row.id,
     authorId: row.authorId,
+    author:
+      row.authorId !== null && row.authorName !== null
+        ? { id: row.authorId, name: row.authorName }
+        : null,
     title: row.title,
     slug: row.slug,
     excerpt: row.excerpt,
@@ -100,7 +104,7 @@ export function createArticlesService(
   }
 
   async function serializeArticleDetail(
-    row: ArticleRow,
+    row: ArticleDetailRow,
     options?: {
       readonly relatedArticles?: readonly ArticleSummaryRow[];
       readonly filterPublicRelatedIds?: boolean;
@@ -236,7 +240,7 @@ export function createArticlesService(
       });
 
       if (created.isPublished && isRecordActive(created)) {
-        revalidator.notify(['articles', `article:${created.slug}`, 'sitemap']);
+        await revalidator.notify(['articles', `article:${created.slug}`, 'sitemap']);
       }
 
       return serializeArticleDetail(created);
@@ -297,7 +301,7 @@ export function createArticlesService(
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
       }
 
-      revalidator.notify([
+      await revalidator.notify([
         'articles',
         `article:${existing.slug}`,
         `article:${updated.slug}`,
@@ -316,7 +320,7 @@ export function createArticlesService(
       }
 
       await articlesRepo.softDeleteById(id, existing.deletedAt ?? new Date());
-      revalidator.notify(['articles', `article:${existing.slug}`, 'sitemap']);
+      await revalidator.notify(['articles', `article:${existing.slug}`, 'sitemap']);
     },
   };
 }

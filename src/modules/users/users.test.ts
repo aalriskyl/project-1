@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { ForbiddenError, NotFoundError } from '@/lib/errors.ts';
+import { ErrorResponseSchema, ForbiddenError, NotFoundError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import { signAccessToken } from '@/lib/jwt.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
@@ -129,6 +129,33 @@ describe('Users HTTP routes (/v1/users)', () => {
       headers: { Authorization: `Bearer ${wrongIssuerToken}` },
     });
     expect(badIssuerRes.status).toBe(401);
+  });
+
+  test('rejects wrong audience, expired and tampered-signature tokens', async () => {
+    const { testApp, user1 } = await setupFixture();
+    const baseConfig = {
+      secret: process.env['JWT_ACCESS_SECRET'] ?? 'fallback-secret-at-least-32-characters',
+      issuer: process.env['JWT_ISSUER'] ?? 'project-1-api',
+      audience: process.env['JWT_AUDIENCE'] ?? 'project-1-client-test',
+      accessTtlSec: 900,
+    };
+
+    const wrongAudienceToken = (
+      await signAccessToken(user1, { ...baseConfig, audience: 'another-service' })
+    ).token;
+    const expiredToken = (await signAccessToken(user1, { ...baseConfig, accessTtlSec: -60 })).token;
+    const validToken = (await signAccessToken(user1, baseConfig)).token;
+    const [header, payload, signature] = validToken.split('.');
+    expect(signature).toBeDefined();
+    const tamperedToken = `${header}.${payload}.${signature === undefined ? '' : `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`}`;
+
+    for (const token of [wrongAudienceToken, expiredToken, tamperedToken]) {
+      const res = await testApp.request('/v1/users/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(401);
+      expect(ErrorResponseSchema.parse(await res.json()).errorCode).toBe('INVALID_TOKEN');
+    }
   });
 
   test('supports GET /me, PATCH /me (displayName & E.164 phone), IDOR 403 on /{id}, and cursor pagination', async () => {
