@@ -1,49 +1,55 @@
-import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
-import { and, asc, desc, eq, isNull, lt, or, type SQL, sql } from 'drizzle-orm';
-import postgres from 'postgres';
+import { and, asc, desc, eq, isNotNull, isNull, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { articles } from '@/db/schema/articles.ts';
 import { type CategoryRow, categories, type SpecFieldDefRow } from '@/db/schema/categories.ts';
 import { products } from '@/db/schema/products.ts';
+import {
+  activeRecordConditions,
+  buildDescCursorCondition,
+  buildStatusFilterConditions,
+  isUniqueViolation,
+} from '@/lib/db-helpers.ts';
 import { ConflictError } from '@/lib/errors.ts';
-import type { DecodedCursor } from '@/lib/pagination.ts';
 import { buildFuzzyRelevanceScoreSql, buildFuzzySearchCondition } from '@/lib/search.ts';
+import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
+import type {
+  AdminListFilter,
+  CursorListParams,
+  OffsetListParams,
+  OffsetListResult,
+  SeoMetadataPatch,
+  SeoMetadataRecord,
+  SoftDeletePatch,
+} from '@/types/common.ts';
 
-export interface CreateCategoryRecord {
+export interface CreateCategoryRecord extends SeoMetadataRecord {
   readonly id: string;
   readonly parentId: string | null;
   readonly name: string;
   readonly slug: string;
   readonly description: string | null;
-  readonly metaTitle: string | null;
-  readonly metaDescription: string | null;
-  readonly focusKeyword: string | null;
-  readonly canonicalUrl: string | null;
-  readonly noIndex: boolean;
-  readonly ogImageUrl: string | null;
   readonly imageUrl: string | null;
   readonly bannerImageUrl: string | null;
   readonly specSchema: SpecFieldDefRow[];
   readonly sortOrder: number;
   readonly isActive: boolean;
+  readonly deletedAt?: Date | null;
 }
 
-export interface UpdateCategoryRecord {
+export interface UpdateCategoryRecord extends SeoMetadataPatch, SoftDeletePatch {
   readonly parentId?: string | null;
   readonly name?: string;
   readonly slug?: string;
   readonly description?: string | null;
-  readonly metaTitle?: string | null;
-  readonly metaDescription?: string | null;
-  readonly focusKeyword?: string | null;
-  readonly canonicalUrl?: string | null;
-  readonly noIndex?: boolean;
-  readonly ogImageUrl?: string | null;
   readonly imageUrl?: string | null;
   readonly bannerImageUrl?: string | null;
   readonly specSchema?: SpecFieldDefRow[];
   readonly sortOrder?: number;
-  readonly isActive?: boolean;
+}
+
+export interface AdminCategoriesFilter extends AdminListFilter {
+  readonly parentId?: string;
+  readonly rootOnly?: boolean;
 }
 
 export interface SitemapRow {
@@ -52,17 +58,17 @@ export interface SitemapRow {
 }
 
 export interface CatalogRepository {
-  listActive(filter?: { readonly query?: string }): Promise<readonly CategoryRow[]>;
-  listAdminCursor(params: {
-    readonly limit: number;
-    readonly cursor?: DecodedCursor;
+  listActive(filter?: {
     readonly query?: string;
+    readonly parentId?: string;
+    readonly rootOnly?: boolean;
   }): Promise<readonly CategoryRow[]>;
-  listAdminOffset(params: {
-    readonly limit: number;
-    readonly offset: number;
-    readonly query?: string;
-  }): Promise<{ readonly items: readonly CategoryRow[]; readonly total: number }>;
+  listAdminCursor(
+    params: AdminCategoriesFilter & CursorListParams,
+  ): Promise<readonly CategoryRow[]>;
+  listAdminOffset(
+    params: AdminCategoriesFilter & OffsetListParams,
+  ): Promise<OffsetListResult<CategoryRow>>;
   findById(id: string): Promise<CategoryRow | null>;
   findActiveBySlug(slug: string): Promise<CategoryRow | null>;
   listActiveChildren(parentId: string): Promise<readonly CategoryRow[]>;
@@ -78,22 +84,40 @@ export interface CatalogRepository {
   }>;
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  if (err instanceof postgres.PostgresError && err.code === '23505') {
-    return true;
-  }
-  if (typeof err === 'object' && err !== null && 'cause' in err) {
-    return isUniqueViolation(err.cause);
-  }
-  return false;
-}
-
 export function createCatalogRepository(db: Database): CatalogRepository {
   const categorySearchTarget = sql`(${categories.name} || ' ' || ${categories.slug} || ' ' || coalesce(${categories.description}, ''))`;
 
+  function buildAdminFilterConditions(params: AdminCategoriesFilter): SQL[] {
+    const conditions: SQL[] = buildStatusFilterConditions(categories, params.status);
+    if (params.parentId !== undefined) {
+      conditions.push(eq(categories.parentId, params.parentId));
+    } else if (params.rootOnly === true) {
+      conditions.push(isNull(categories.parentId));
+    } else if (params.rootOnly === false) {
+      conditions.push(isNotNull(categories.parentId));
+    }
+    if (params.query !== undefined) {
+      conditions.push(
+        buildFuzzySearchCondition({ targetSql: categorySearchTarget, query: params.query }),
+      );
+    }
+    return conditions;
+  }
+
   return {
-    async listActive(filter?: { readonly query?: string }): Promise<readonly CategoryRow[]> {
-      const conditions: SQL[] = [isNull(categories.deletedAt), eq(categories.isActive, true)];
+    async listActive(filter?: {
+      readonly query?: string;
+      readonly parentId?: string;
+      readonly rootOnly?: boolean;
+    }): Promise<readonly CategoryRow[]> {
+      const conditions: SQL[] = activeRecordConditions(categories);
+      if (filter?.parentId !== undefined) {
+        conditions.push(eq(categories.parentId, filter.parentId));
+      } else if (filter?.rootOnly === true) {
+        conditions.push(isNull(categories.parentId));
+      } else if (filter?.rootOnly === false) {
+        conditions.push(isNotNull(categories.parentId));
+      }
       if (filter?.query !== undefined) {
         conditions.push(
           buildFuzzySearchCondition({ targetSql: categorySearchTarget, query: filter.query }),
@@ -114,35 +138,41 @@ export function createCatalogRepository(db: Database): CatalogRepository {
         );
     },
 
-    async listAdminCursor({ limit, cursor, query }): Promise<readonly CategoryRow[]> {
-      const conditions: SQL[] = [isNull(categories.deletedAt)];
-      if (query !== undefined) {
-        conditions.push(buildFuzzySearchCondition({ targetSql: categorySearchTarget, query }));
-      }
-      if (cursor !== undefined) {
-        const cursorCond = or(
-          lt(categories.createdAt, cursor.createdAt),
-          and(eq(categories.createdAt, cursor.createdAt), lt(categories.id, cursor.id)),
-        );
-        if (cursorCond !== undefined) {
-          conditions.push(cursorCond);
-        }
+    async listAdminCursor({
+      limit,
+      cursor,
+      query,
+      status,
+      parentId,
+      rootOnly,
+    }): Promise<readonly CategoryRow[]> {
+      const conditions = buildAdminFilterConditions({
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(parentId !== undefined ? { parentId } : {}),
+        ...(rootOnly !== undefined ? { rootOnly } : {}),
+      });
+      const cursorCond = buildDescCursorCondition(categories.createdAt, categories.id, cursor);
+      if (cursorCond !== undefined) {
+        conditions.push(cursorCond);
       }
 
       return db
         .select()
         .from(categories)
-        .where(and(...conditions))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(categories.createdAt), desc(categories.id))
         .limit(limit);
     },
 
-    async listAdminOffset({ limit, offset, query }) {
-      const conditions: SQL[] = [isNull(categories.deletedAt)];
-      if (query !== undefined) {
-        conditions.push(buildFuzzySearchCondition({ targetSql: categorySearchTarget, query }));
-      }
-      const whereClause = and(...conditions);
+    async listAdminOffset({ limit, offset, query, status, parentId, rootOnly }) {
+      const conditions = buildAdminFilterConditions({
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(parentId !== undefined ? { parentId } : {}),
+        ...(rootOnly !== undefined ? { rootOnly } : {}),
+      });
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
       const [items, countRows] = await Promise.all([
         db
@@ -162,11 +192,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
     },
 
     async findById(id: string): Promise<CategoryRow | null> {
-      const [row] = await db
-        .select()
-        .from(categories)
-        .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
-        .limit(1);
+      const [row] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
       return row ?? null;
     },
 
@@ -203,7 +229,13 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       const [child] = await db
         .select({ id: categories.id })
         .from(categories)
-        .where(and(eq(categories.parentId, parentId), isNull(categories.deletedAt)))
+        .where(
+          and(
+            eq(categories.parentId, parentId),
+            eq(categories.isActive, true),
+            isNull(categories.deletedAt),
+          ),
+        )
         .limit(1);
       return child !== undefined;
     },
@@ -212,7 +244,13 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       const [product] = await db
         .select({ id: products.id })
         .from(products)
-        .where(and(eq(products.categoryId, categoryId), isNull(products.deletedAt)))
+        .where(
+          and(
+            eq(products.categoryId, categoryId),
+            eq(products.isActive, true),
+            isNull(products.deletedAt),
+          ),
+        )
         .limit(1);
       return product !== undefined;
     },
@@ -239,6 +277,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
               specSchema: input.specSchema,
               sortOrder: input.sortOrder,
               isActive: input.isActive,
+              deletedAt: input.deletedAt ?? null,
             })
             .returning();
 
@@ -267,7 +306,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
               ...patch,
               updatedAt: new Date(),
             })
-            .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
+            .where(eq(categories.id, id))
             .returning();
           return updated ?? null;
         });
@@ -286,8 +325,8 @@ export function createCatalogRepository(db: Database): CatalogRepository {
       const deleted = await withMediaMutation(db, 'categories', async (tx) => {
         const [row] = await tx
           .update(categories)
-          .set({ deletedAt, updatedAt: deletedAt })
-          .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
+          .set({ isActive: false, deletedAt, updatedAt: deletedAt })
+          .where(eq(categories.id, id))
           .returning();
         return row ?? null;
       });
@@ -324,6 +363,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
           .where(
             and(
               isNull(articles.deletedAt),
+              eq(articles.isActive, true),
               eq(articles.isPublished, true),
               eq(articles.noIndex, false),
             ),

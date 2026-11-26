@@ -239,9 +239,110 @@ describe('Catalog & SEO HTTP routes (/v1/categories, /v1/admin/categories, /v1/s
     expect(adminPage.meta.totalPages).toBe(2);
     expect(adminPage.meta.hasMore).toBe(true);
 
+    // Category filters: ?rootOnly=true, ?parentId=, and mutually exclusive ?rootOnly=true&parentId= -> 422
+    const rootOnlyPublic = CategoryListEnvelopeSchema.parse(
+      await (await testApp.request('/v1/categories?rootOnly=true')).json(),
+    );
+    expect(rootOnlyPublic.data).toHaveLength(1);
+    expect(rootOnlyPublic.data[0]?.id).toBe(rootCreated.data.id);
+
+    const childrenByParentPublic = CategoryListEnvelopeSchema.parse(
+      await (await testApp.request(`/v1/categories?parentId=${rootCreated.data.id}`)).json(),
+    );
+    expect(childrenByParentPublic.data).toHaveLength(1);
+    expect(childrenByParentPublic.data[0]?.slug).toBe('hand-mixer');
+
+    expect(
+      (await testApp.request(`/v1/categories?rootOnly=true&parentId=${rootCreated.data.id}`))
+        .status,
+    ).toBe(422);
+
+    const adminSubOnly = CategoryCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/categories?rootOnly=false', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminSubOnly.data).toHaveLength(1);
+    expect(adminSubOnly.data[0]?.parentId).toBe(rootCreated.data.id);
+
     const badComboRes = await testApp.request('/v1/admin/categories?page=1&cursor=abc', {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
     expect(badComboRes.status).toBe(422);
+
+    // Deactivating root category via PATCH while active child exists must fail with 409 (matching DELETE)
+    const patchDeactivateRoot = await testApp.request(
+      `/v1/admin/categories/${rootCreated.data.id}`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'inactive' }),
+      },
+    );
+    expect(patchDeactivateRoot.status).toBe(409);
+
+    // Soft-delete subcategory -> status='inactive', hidden from public, visible in admin GET /:id & ?status=inactive, restorable via PATCH
+    const subCreated = CategoryEnvelopeSchema.parse(await subRes.json()).data;
+    const delSubRes = await testApp.request(`/v1/admin/categories/${subCreated.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(delSubRes.status).toBe(204);
+    expect((await testApp.request('/v1/categories/hand-mixer')).status).toBe(404);
+
+    // Admin can still fetch inactive category by ID (with parent & effectiveSpecSchema)
+    const adminGetInactiveCat = await testApp.request(`/v1/admin/categories/${subCreated.id}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(adminGetInactiveCat.status).toBe(200);
+    const inactiveCatDetail = CategoryDetailEnvelopeSchema.parse(await adminGetInactiveCat.json());
+    expect(inactiveCatDetail.data.status).toBe('inactive');
+    expect(inactiveCatDetail.data.deletedAt).not.toBeNull();
+    expect(inactiveCatDetail.data.parent?.id).toBe(rootCreated.data.id);
+    expect(inactiveCatDetail.data.effectiveSpecSchema).toHaveLength(1);
+
+    // Non-admin cannot access GET /v1/admin/categories/:id
+    expect(
+      (
+        await testApp.request(`/v1/admin/categories/${subCreated.id}`, {
+          headers: { Authorization: `Bearer ${userToken}` },
+        })
+      ).status,
+    ).toBe(403);
+
+    const inactiveCats = CategoryCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/categories?status=inactive', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(inactiveCats.data).toHaveLength(1);
+    expect(inactiveCats.data[0]?.id).toBe(subCreated.id);
+    expect(inactiveCats.data[0]?.status).toBe('inactive');
+    expect(inactiveCats.data[0]?.deletedAt).not.toBeNull();
+
+    // Conflicting status + isActive returns 422
+    const conflictPatch = await testApp.request(`/v1/admin/categories/${subCreated.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active', isActive: false }),
+    });
+    expect(conflictPatch.status).toBe(422);
+
+    // Restore via PATCH { status: 'active' }
+    const restoreSubRes = await testApp.request(`/v1/admin/categories/${subCreated.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    expect(restoreSubRes.status).toBe(200);
+    const restoredSub = CategoryEnvelopeSchema.parse(await restoreSubRes.json()).data;
+    expect(restoredSub.status).toBe('active');
+    expect(restoredSub.isActive).toBe(true);
+    expect(restoredSub.deletedAt).toBeNull();
+    expect((await testApp.request('/v1/categories/hand-mixer')).status).toBe(200);
   });
 });

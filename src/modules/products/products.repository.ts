@@ -1,21 +1,66 @@
-import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
-import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql } from 'drizzle-orm';
-import postgres from 'postgres';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import {
+  type ProductCustomSpecRow,
   type ProductMediaItemRow,
   type ProductRow,
   type ProductSpecsMap,
   productSpareparts,
   products,
 } from '@/db/schema/products.ts';
+import {
+  activeRecordConditions,
+  buildDateRangeConditions,
+  buildDescCursorCondition,
+  buildStatusFilterConditions,
+  extractPostgresError,
+} from '@/lib/db-helpers.ts';
 import { ConflictError } from '@/lib/errors.ts';
-import type { DecodedCursor } from '@/lib/pagination.ts';
-import { buildFuzzySearchCondition } from '@/lib/search.ts';
-import type { ProductType } from '@/modules/products/products.schema.ts';
+import { buildFuzzySearchCondition, escapeLikePattern } from '@/lib/search.ts';
+import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
+import type {
+  ProductSort,
+  ProductSpecFilter,
+  ProductType,
+} from '@/modules/products/products.schema.ts';
+import type {
+  AdminDateListFilter,
+  CursorListParams,
+  OffsetListParams,
+  OffsetListResult,
+  SeoMetadataPatch,
+  SeoMetadataRecord,
+  SoftDeletableEntity,
+  SoftDeletePatch,
+} from '@/types/common.ts';
 
-export interface ProductCardRow {
-  readonly id: string;
+export type ProductSortCursor =
+  | { readonly sort: 'newest'; readonly createdAt: Date; readonly id: string }
+  | { readonly sort: 'price_asc'; readonly priceIdr: number; readonly id: string }
+  | { readonly sort: 'price_desc'; readonly priceIdr: number; readonly id: string }
+  | {
+      readonly sort: 'rating_desc';
+      readonly ratingAvg: string;
+      readonly reviewCount: number;
+      readonly id: string;
+    };
+
+export interface ProductCardRow extends SoftDeletableEntity {
   readonly categoryId: string;
   readonly brandSlug: string | null;
   readonly name: string;
@@ -26,12 +71,9 @@ export interface ProductCardRow {
   readonly requiresQuote: boolean;
   readonly stock: number;
   readonly isFeatured: boolean;
-  readonly isActive: boolean;
   readonly primaryImageUrl: string | null;
   readonly ratingAvg: string;
   readonly reviewCount: number;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
 }
 
 export interface ProductSparepartCardRow extends ProductCardRow {
@@ -40,18 +82,31 @@ export interface ProductSparepartCardRow extends ProductCardRow {
 
 export interface ListPublicProductsFilter {
   readonly limit: number;
-  readonly cursor?: DecodedCursor;
+  readonly sort?: ProductSort;
+  readonly cursor?: ProductSortCursor;
   readonly categoryIds?: readonly string[];
-  readonly brandSlug?: string;
+  readonly brandSlugs?: readonly string[];
   readonly isFeatured?: boolean;
   readonly productType?: ProductType;
   readonly requiresQuote?: boolean;
+  readonly inStock?: boolean;
+  readonly minRating?: number;
   readonly minPrice?: number;
   readonly maxPrice?: number;
+  readonly specFilters?: readonly ProductSpecFilter[];
   readonly query?: string;
 }
 
-export interface CreateProductRecord {
+export interface ListAdminProductsFilter extends AdminDateListFilter {
+  readonly categoryId?: string;
+  readonly brandSlugs?: readonly string[];
+  readonly productType?: ProductType;
+  readonly isFeatured?: boolean;
+  readonly requiresQuote?: boolean;
+  readonly inStock?: boolean;
+}
+
+export interface CreateProductRecord extends SeoMetadataRecord {
   readonly id: string;
   readonly categoryId: string;
   readonly brandSlug: string | null;
@@ -60,27 +115,23 @@ export interface CreateProductRecord {
   readonly sku: string | null;
   readonly productType: ProductType;
   readonly descriptionMd: string | null;
-  readonly metaTitle: string | null;
-  readonly metaDescription: string | null;
-  readonly focusKeyword: string | null;
-  readonly canonicalUrl: string | null;
-  readonly noIndex: boolean;
-  readonly ogImageUrl: string | null;
   readonly priceIdr: number;
   readonly requiresQuote: boolean;
   readonly stock: number;
   readonly isFeatured: boolean;
   readonly isActive: boolean;
+  readonly deletedAt?: Date | null;
   readonly primaryImageUrl: string | null;
   readonly media: ProductMediaItemRow[];
   readonly specs: ProductSpecsMap;
+  readonly customSpecs: ProductCustomSpecRow[];
   readonly lengthCm: string | null;
   readonly widthCm: string | null;
   readonly heightCm: string | null;
   readonly weightKg: string | null;
 }
 
-export interface UpdateProductRecord {
+export interface UpdateProductRecord extends SeoMetadataPatch, SoftDeletePatch {
   readonly categoryId?: string;
   readonly brandSlug?: string | null;
   readonly name?: string;
@@ -88,20 +139,14 @@ export interface UpdateProductRecord {
   readonly sku?: string | null;
   readonly productType?: ProductType;
   readonly descriptionMd?: string | null;
-  readonly metaTitle?: string | null;
-  readonly metaDescription?: string | null;
-  readonly focusKeyword?: string | null;
-  readonly canonicalUrl?: string | null;
-  readonly noIndex?: boolean;
-  readonly ogImageUrl?: string | null;
   readonly priceIdr?: number;
   readonly requiresQuote?: boolean;
   readonly stock?: number;
   readonly isFeatured?: boolean;
-  readonly isActive?: boolean;
   readonly primaryImageUrl?: string | null;
   readonly media?: ProductMediaItemRow[];
   readonly specs?: ProductSpecsMap;
+  readonly customSpecs?: ProductCustomSpecRow[];
   readonly lengthCm?: string | null;
   readonly widthCm?: string | null;
   readonly heightCm?: string | null;
@@ -110,16 +155,12 @@ export interface UpdateProductRecord {
 
 export interface ProductsRepository {
   listPublicCursor(filter: ListPublicProductsFilter): Promise<readonly ProductCardRow[]>;
-  listAdminCursor(params: {
-    readonly limit: number;
-    readonly cursor?: DecodedCursor;
-    readonly query?: string;
-  }): Promise<readonly ProductCardRow[]>;
-  listAdminOffset(params: {
-    readonly limit: number;
-    readonly offset: number;
-    readonly query?: string;
-  }): Promise<{ readonly items: readonly ProductCardRow[]; readonly total: number }>;
+  listAdminCursor(
+    params: ListAdminProductsFilter & CursorListParams,
+  ): Promise<readonly ProductCardRow[]>;
+  listAdminOffset(
+    params: ListAdminProductsFilter & OffsetListParams,
+  ): Promise<OffsetListResult<ProductCardRow>>;
   findActiveBySlug(slug: string): Promise<ProductRow | null>;
   findById(id: string): Promise<ProductRow | null>;
   findActiveByIds(ids: readonly string[]): Promise<readonly ProductRow[]>;
@@ -130,11 +171,12 @@ export interface ProductsRepository {
     readonly excludeProductId?: string;
     readonly limit: number;
   }): Promise<readonly ProductCardRow[]>;
-  listSparepartsCursor(params: {
-    readonly parentProductId: string;
-    readonly limit: number;
-    readonly cursor?: DecodedCursor;
-  }): Promise<readonly ProductSparepartCardRow[]>;
+  listSparepartsCursor(
+    params: CursorListParams & {
+      readonly parentProductId: string;
+      readonly query?: string;
+    },
+  ): Promise<readonly ProductSparepartCardRow[]>;
   replaceSpareparts(
     parentProductId: string,
     items: readonly { readonly sparepartProductId: string; readonly note?: string }[],
@@ -142,16 +184,6 @@ export interface ProductsRepository {
   create(input: CreateProductRecord): Promise<ProductRow>;
   updateById(id: string, patch: UpdateProductRecord): Promise<ProductRow | null>;
   softDeleteById(id: string, deletedAt: Date): Promise<boolean>;
-}
-
-function extractPostgresError(err: unknown): postgres.PostgresError | null {
-  if (err instanceof postgres.PostgresError) {
-    return err;
-  }
-  if (typeof err === 'object' && err !== null && 'cause' in err) {
-    return extractPostgresError(err.cause);
-  }
-  return null;
 }
 
 function mapUniqueViolation(err: unknown): never {
@@ -181,6 +213,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
     stock: products.stock,
     isFeatured: products.isFeatured,
     isActive: products.isActive,
+    deletedAt: products.deletedAt,
     primaryImageUrl: products.primaryImageUrl,
     ratingAvg: products.ratingAvg,
     reviewCount: products.reviewCount,
@@ -188,9 +221,81 @@ export function createProductsRepository(db: Database): ProductsRepository {
     updatedAt: products.updatedAt,
   };
 
+  function buildSpecFilterCondition(specFilter: ProductSpecFilter): SQL {
+    const { key } = specFilter;
+    if (specFilter.op === 'gt') {
+      return sql`(CASE WHEN jsonb_typeof(${products.specs} -> ${key}) = 'number' THEN (${products.specs} ->> ${key})::double precision END) > ${specFilter.value}`;
+    }
+    if (specFilter.op === 'gte') {
+      return sql`(CASE WHEN jsonb_typeof(${products.specs} -> ${key}) = 'number' THEN (${products.specs} ->> ${key})::double precision END) >= ${specFilter.value}`;
+    }
+    if (specFilter.op === 'lt') {
+      return sql`(CASE WHEN jsonb_typeof(${products.specs} -> ${key}) = 'number' THEN (${products.specs} ->> ${key})::double precision END) < ${specFilter.value}`;
+    }
+    if (specFilter.op === 'lte') {
+      return sql`(CASE WHEN jsonb_typeof(${products.specs} -> ${key}) = 'number' THEN (${products.specs} ->> ${key})::double precision END) <= ${specFilter.value}`;
+    }
+    if (specFilter.op === 'contains') {
+      const likeVal = `%${escapeLikePattern(specFilter.value)}%`;
+      return sql`(jsonb_typeof(${products.specs} -> ${key}) = 'string' AND (${products.specs} ->> ${key}) ILIKE ${likeVal})`;
+    }
+    if (typeof specFilter.value === 'boolean') {
+      const boolStr = specFilter.value ? 'true' : 'false';
+      return sql`(jsonb_typeof(${products.specs} -> ${key}) = 'boolean' AND (${products.specs} ->> ${key}) = ${boolStr})`;
+    }
+    if (typeof specFilter.value === 'number') {
+      const rawLower = String(specFilter.value).toLowerCase();
+      return sql`((CASE WHEN jsonb_typeof(${products.specs} -> ${key}) = 'number' THEN (${products.specs} ->> ${key})::double precision END) = ${specFilter.value} OR (jsonb_typeof(${products.specs} -> ${key}) = 'string' AND lower(${products.specs} ->> ${key}) = ${rawLower}))`;
+    }
+    const rawLower = specFilter.value.toLowerCase();
+    return sql`(jsonb_typeof(${products.specs} -> ${key}) = 'string' AND lower(${products.specs} ->> ${key}) = ${rawLower})`;
+  }
+
+  function buildAdminFilterConditions(params: ListAdminProductsFilter): SQL[] {
+    const conditions: SQL[] = [
+      ...buildStatusFilterConditions(products, params.status),
+      ...buildDateRangeConditions(products.createdAt, params),
+    ];
+    if (params.categoryId !== undefined) {
+      conditions.push(eq(products.categoryId, params.categoryId));
+    }
+    if (params.brandSlugs !== undefined && params.brandSlugs.length > 0) {
+      if (params.brandSlugs.length === 1 && params.brandSlugs[0] !== undefined) {
+        conditions.push(eq(products.brandSlug, params.brandSlugs[0]));
+      } else {
+        conditions.push(inArray(products.brandSlug, [...params.brandSlugs]));
+      }
+    }
+    if (params.productType !== undefined) {
+      conditions.push(eq(products.productType, params.productType));
+    }
+    if (params.isFeatured !== undefined) {
+      conditions.push(eq(products.isFeatured, params.isFeatured));
+    }
+    if (params.requiresQuote !== undefined) {
+      conditions.push(eq(products.requiresQuote, params.requiresQuote));
+    }
+    if (params.inStock === true) {
+      conditions.push(gt(products.stock, 0));
+    } else if (params.inStock === false) {
+      conditions.push(eq(products.stock, 0));
+    }
+    if (params.query !== undefined) {
+      conditions.push(
+        buildFuzzySearchCondition({
+          targetSql: productSearchTarget,
+          query: params.query,
+          searchVector: sql`${products.searchVector}`,
+        }),
+      );
+    }
+    return conditions;
+  }
+
   return {
     async listPublicCursor(filter: ListPublicProductsFilter): Promise<readonly ProductCardRow[]> {
-      const conditions: SQL[] = [isNull(products.deletedAt), eq(products.isActive, true)];
+      const conditions: SQL[] = activeRecordConditions(products);
+      const sort = filter.sort ?? 'newest';
 
       if (filter.categoryIds !== undefined) {
         if (filter.categoryIds.length === 0) {
@@ -198,8 +303,12 @@ export function createProductsRepository(db: Database): ProductsRepository {
         }
         conditions.push(inArray(products.categoryId, [...filter.categoryIds]));
       }
-      if (filter.brandSlug !== undefined) {
-        conditions.push(eq(products.brandSlug, filter.brandSlug));
+      if (filter.brandSlugs !== undefined && filter.brandSlugs.length > 0) {
+        if (filter.brandSlugs.length === 1 && filter.brandSlugs[0] !== undefined) {
+          conditions.push(eq(products.brandSlug, filter.brandSlugs[0]));
+        } else {
+          conditions.push(inArray(products.brandSlug, [...filter.brandSlugs]));
+        }
       }
       if (filter.isFeatured !== undefined) {
         conditions.push(eq(products.isFeatured, filter.isFeatured));
@@ -210,11 +319,24 @@ export function createProductsRepository(db: Database): ProductsRepository {
       if (filter.requiresQuote !== undefined) {
         conditions.push(eq(products.requiresQuote, filter.requiresQuote));
       }
+      if (filter.inStock === true) {
+        conditions.push(gt(products.stock, 0));
+      } else if (filter.inStock === false) {
+        conditions.push(eq(products.stock, 0));
+      }
+      if (filter.minRating !== undefined) {
+        conditions.push(gte(products.ratingAvg, filter.minRating.toFixed(2)));
+      }
       if (filter.minPrice !== undefined) {
         conditions.push(gte(products.priceIdr, filter.minPrice));
       }
       if (filter.maxPrice !== undefined) {
         conditions.push(lte(products.priceIdr, filter.maxPrice));
+      }
+      if (filter.specFilters !== undefined) {
+        for (const specFilter of filter.specFilters) {
+          conditions.push(buildSpecFilterCondition(specFilter));
+        }
       }
       if (filter.query !== undefined) {
         conditions.push(
@@ -226,64 +348,121 @@ export function createProductsRepository(db: Database): ProductsRepository {
         );
       }
       if (filter.cursor !== undefined) {
-        const cursorCond = or(
-          lt(products.createdAt, filter.cursor.createdAt),
-          and(eq(products.createdAt, filter.cursor.createdAt), lt(products.id, filter.cursor.id)),
-        );
+        let cursorCond: SQL | undefined;
+        if (filter.cursor.sort === 'newest') {
+          cursorCond = buildDescCursorCondition(products.createdAt, products.id, filter.cursor);
+        } else if (filter.cursor.sort === 'price_asc') {
+          cursorCond = or(
+            gt(products.priceIdr, filter.cursor.priceIdr),
+            and(eq(products.priceIdr, filter.cursor.priceIdr), gt(products.id, filter.cursor.id)),
+          );
+        } else if (filter.cursor.sort === 'price_desc') {
+          cursorCond = or(
+            lt(products.priceIdr, filter.cursor.priceIdr),
+            and(eq(products.priceIdr, filter.cursor.priceIdr), lt(products.id, filter.cursor.id)),
+          );
+        } else {
+          cursorCond = or(
+            lt(products.ratingAvg, filter.cursor.ratingAvg),
+            and(
+              eq(products.ratingAvg, filter.cursor.ratingAvg),
+              lt(products.reviewCount, filter.cursor.reviewCount),
+            ),
+            and(
+              eq(products.ratingAvg, filter.cursor.ratingAvg),
+              eq(products.reviewCount, filter.cursor.reviewCount),
+              lt(products.id, filter.cursor.id),
+            ),
+          );
+        }
         if (cursorCond !== undefined) {
           conditions.push(cursorCond);
         }
       }
 
+      const orderByClauses =
+        sort === 'price_asc'
+          ? [asc(products.priceIdr), asc(products.id)]
+          : sort === 'price_desc'
+            ? [desc(products.priceIdr), desc(products.id)]
+            : sort === 'rating_desc'
+              ? [desc(products.ratingAvg), desc(products.reviewCount), desc(products.id)]
+              : [desc(products.createdAt), desc(products.id)];
+
       return db
         .select(cardColumns)
         .from(products)
         .where(and(...conditions))
-        .orderBy(desc(products.createdAt), desc(products.id))
+        .orderBy(...orderByClauses)
         .limit(filter.limit);
     },
 
-    async listAdminCursor({ limit, cursor, query }): Promise<readonly ProductCardRow[]> {
-      const conditions: SQL[] = [isNull(products.deletedAt)];
-      if (query !== undefined) {
-        conditions.push(
-          buildFuzzySearchCondition({
-            targetSql: productSearchTarget,
-            query,
-            searchVector: sql`${products.searchVector}`,
-          }),
-        );
-      }
-      if (cursor !== undefined) {
-        const cursorCond = or(
-          lt(products.createdAt, cursor.createdAt),
-          and(eq(products.createdAt, cursor.createdAt), lt(products.id, cursor.id)),
-        );
-        if (cursorCond !== undefined) {
-          conditions.push(cursorCond);
-        }
+    async listAdminCursor({
+      limit,
+      cursor,
+      query,
+      status,
+      categoryId,
+      brandSlugs,
+      productType,
+      isFeatured,
+      requiresQuote,
+      inStock,
+      createdFrom,
+      createdTo,
+    }): Promise<readonly ProductCardRow[]> {
+      const conditions = buildAdminFilterConditions({
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(categoryId !== undefined ? { categoryId } : {}),
+        ...(brandSlugs !== undefined ? { brandSlugs } : {}),
+        ...(productType !== undefined ? { productType } : {}),
+        ...(isFeatured !== undefined ? { isFeatured } : {}),
+        ...(requiresQuote !== undefined ? { requiresQuote } : {}),
+        ...(inStock !== undefined ? { inStock } : {}),
+        ...(createdFrom !== undefined ? { createdFrom } : {}),
+        ...(createdTo !== undefined ? { createdTo } : {}),
+      });
+      const cursorCond = buildDescCursorCondition(products.createdAt, products.id, cursor);
+      if (cursorCond !== undefined) {
+        conditions.push(cursorCond);
       }
 
       return db
         .select(cardColumns)
         .from(products)
-        .where(and(...conditions))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(products.createdAt), desc(products.id))
         .limit(limit);
     },
 
-    async listAdminOffset({ limit, offset, query }) {
-      const conditions: SQL[] = [isNull(products.deletedAt)];
-      if (query !== undefined) {
-        conditions.push(
-          buildFuzzySearchCondition({
-            targetSql: productSearchTarget,
-            query,
-            searchVector: sql`${products.searchVector}`,
-          }),
-        );
-      }
-      const whereClause = and(...conditions);
+    async listAdminOffset({
+      limit,
+      offset,
+      query,
+      status,
+      categoryId,
+      brandSlugs,
+      productType,
+      isFeatured,
+      requiresQuote,
+      inStock,
+      createdFrom,
+      createdTo,
+    }) {
+      const conditions = buildAdminFilterConditions({
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(categoryId !== undefined ? { categoryId } : {}),
+        ...(brandSlugs !== undefined ? { brandSlugs } : {}),
+        ...(productType !== undefined ? { productType } : {}),
+        ...(isFeatured !== undefined ? { isFeatured } : {}),
+        ...(requiresQuote !== undefined ? { requiresQuote } : {}),
+        ...(inStock !== undefined ? { inStock } : {}),
+        ...(createdFrom !== undefined ? { createdFrom } : {}),
+        ...(createdTo !== undefined ? { createdTo } : {}),
+      });
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
       const [items, countRows] = await Promise.all([
         db
@@ -314,11 +493,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
     },
 
     async findById(id: string): Promise<ProductRow | null> {
-      const [row] = await db
-        .select()
-        .from(products)
-        .where(and(eq(products.id, id), isNull(products.deletedAt)))
-        .limit(1);
+      const [row] = await db.select().from(products).where(eq(products.id, id)).limit(1);
       return row ?? null;
     },
 
@@ -394,21 +569,26 @@ export function createProductsRepository(db: Database): ProductsRepository {
       parentProductId,
       limit,
       cursor,
+      query,
     }): Promise<readonly ProductSparepartCardRow[]> {
       const conditions: SQL[] = [
         eq(productSpareparts.parentProductId, parentProductId),
-        isNull(products.deletedAt),
-        eq(products.isActive, true),
+        ...activeRecordConditions(products),
       ];
 
-      if (cursor !== undefined) {
-        const cursorCond = or(
-          lt(products.createdAt, cursor.createdAt),
-          and(eq(products.createdAt, cursor.createdAt), lt(products.id, cursor.id)),
+      if (query !== undefined) {
+        conditions.push(
+          buildFuzzySearchCondition({
+            targetSql: productSearchTarget,
+            query,
+            searchVector: sql`${products.searchVector}`,
+          }),
         );
-        if (cursorCond !== undefined) {
-          conditions.push(cursorCond);
-        }
+      }
+
+      const cursorCond = buildDescCursorCondition(products.createdAt, products.id, cursor);
+      if (cursorCond !== undefined) {
+        conditions.push(cursorCond);
       }
 
       return db
@@ -468,9 +648,11 @@ export function createProductsRepository(db: Database): ProductsRepository {
               stock: input.stock,
               isFeatured: input.isFeatured,
               isActive: input.isActive,
+              deletedAt: input.deletedAt ?? null,
               primaryImageUrl: input.primaryImageUrl,
               media: input.media,
               specs: input.specs,
+              customSpecs: input.customSpecs,
               lengthCm: input.lengthCm,
               widthCm: input.widthCm,
               heightCm: input.heightCm,
@@ -497,7 +679,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
               ...patch,
               updatedAt: new Date(),
             })
-            .where(and(eq(products.id, id), isNull(products.deletedAt)))
+            .where(eq(products.id, id))
             .returning();
           return updated ?? null;
         });
@@ -510,8 +692,8 @@ export function createProductsRepository(db: Database): ProductsRepository {
       const deleted = await withMediaMutation(db, 'products', async (tx) => {
         const [row] = await tx
           .update(products)
-          .set({ deletedAt, updatedAt: deletedAt })
-          .where(and(eq(products.id, id), isNull(products.deletedAt)))
+          .set({ isActive: false, deletedAt, updatedAt: deletedAt })
+          .where(eq(products.id, id))
           .returning();
         return row ?? null;
       });

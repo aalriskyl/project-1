@@ -5,7 +5,7 @@ order: 1800
 pathVariables:
   - key: id
     value: '{{categoryId}}'
-    description: Category UUIDv7 (must have no subcategories or assigned products)
+    description: Category UUIDv7 (soft-deletes to status=inactive; must have no active subcategories or products)
 scripts:
   - type: afterResponse
     language: text/javascript

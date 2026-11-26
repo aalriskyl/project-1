@@ -157,6 +157,18 @@
             "format": "email",
             "example": "ada@example.com"
           },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Rapienuraim"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Rapienuraim"
+          },
           "phone": {
             "type": [
               "string",
@@ -164,11 +176,12 @@
             ],
             "example": "+6281234567890"
           },
-          "displayName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120,
-            "example": "Rapienuraim"
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "Jl. Pangeran Jayakarta No. 129, Jakarta"
           },
           "role": {
             "type": "string",
@@ -177,6 +190,21 @@
               "admin"
             ],
             "example": "user"
+          },
+          "isActive": {
+            "type": "boolean",
+            "example": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "example": null
           },
           "createdAt": {
             "type": "string",
@@ -192,12 +220,25 @@
         "required": [
           "id",
           "email",
-          "phone",
+          "name",
           "displayName",
+          "phone",
+          "address",
           "role",
+          "isActive",
+          "status",
+          "deletedAt",
           "createdAt",
           "updatedAt"
         ]
+      },
+      "RecordStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "inactive"
+        ],
+        "example": "active"
       },
       "AuthTokens": {
         "type": "object",
@@ -245,6 +286,12 @@
             "maxLength": 128,
             "example": "correct-horse-battery-staple"
           },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Ada Lovelace"
+          },
           "displayName": {
             "type": "string",
             "minLength": 1,
@@ -255,12 +302,17 @@
             "type": "string",
             "pattern": "^\\+[1-9]\\d{7,14}$",
             "example": "+6281234567890"
+          },
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat"
           }
         },
         "required": [
           "email",
-          "password",
-          "displayName"
+          "password"
         ],
         "additionalProperties": false
       },
@@ -366,6 +418,28 @@
         ],
         "additionalProperties": false
       },
+      "ChangePasswordBody": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "correct-horse-battery-staple"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 128,
+            "example": "brand-new-strong-passphrase-2026"
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "additionalProperties": false
+      },
       "RefreshBody": {
         "type": "object",
         "properties": {
@@ -421,6 +495,12 @@
       "UpdateMeBody": {
         "type": "object",
         "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Ada Byron"
+          },
           "displayName": {
             "type": "string",
             "minLength": 1,
@@ -434,6 +514,15 @@
             ],
             "pattern": "^\\+[1-9]\\d{7,14}$",
             "example": "+6281234567890"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat"
           }
         },
         "additionalProperties": false
@@ -499,6 +588,129 @@
           "data",
           "meta"
         ]
+      },
+      "CreateAdminUserBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 128,
+            "example": "staff-strong-passphrase-2026"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Staff Member"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Staff Member"
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "example": "+6281234567890"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "default": "user",
+            "example": "admin"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "isActive": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateUserStatusBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Ada Byron"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Ada Byron"
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{7,14}$",
+            "example": "+6281234567890"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 1000,
+            "example": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "example": "admin"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "isActive": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "additionalProperties": false
       },
       "CategoryListEnvelope": {
         "type": "object",
@@ -687,6 +899,16 @@
           "isActive": {
             "type": "boolean"
           },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -713,6 +935,8 @@
           "specSchema",
           "sortOrder",
           "isActive",
+          "status",
+          "deletedAt",
           "createdAt",
           "updatedAt"
         ]
@@ -899,6 +1123,19 @@
           "isPublished": {
             "type": "boolean"
           },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -917,6 +1154,9 @@
           "rating",
           "comment",
           "isPublished",
+          "isActive",
+          "status",
+          "deletedAt",
           "createdAt",
           "updatedAt"
         ]
@@ -967,6 +1207,25 @@
         "required": [
           "rating"
         ],
+        "additionalProperties": false
+      },
+      "UpdateOwnReviewBody": {
+        "type": "object",
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "example": 4
+          },
+          "comment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          }
+        },
         "additionalProperties": false
       },
       "ProductCursorPage": {
@@ -1093,6 +1352,16 @@
           "isActive": {
             "type": "boolean"
           },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "primaryImageUrl": {
             "type": [
               "string",
@@ -1132,6 +1401,8 @@
           "stock",
           "isFeatured",
           "isActive",
+          "status",
+          "deletedAt",
           "primaryImageUrl",
           "ratingAvg",
           "reviewCount",
@@ -1235,6 +1506,9 @@
               "specs": {
                 "$ref": "#/components/schemas/ProductSpecs"
               },
+              "customSpecs": {
+                "$ref": "#/components/schemas/ProductCustomSpecs"
+              },
               "effectiveSpecSchema": {
                 "type": "array",
                 "items": {
@@ -1267,6 +1541,7 @@
               "ogImageUrl",
               "media",
               "specs",
+              "customSpecs",
               "effectiveSpecSchema",
               "dimensions"
             ]
@@ -1316,6 +1591,41 @@
             }
           ]
         }
+      },
+      "ProductCustomSpecs": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/ProductCustomSpecItem"
+        },
+        "maxItems": 50
+      },
+      "ProductCustomSpecItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "example": "Alternator"
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "example": "Stamford UCI224D"
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "example": "dB @ 7m"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
       },
       "ProductDimensions": {
         "type": "object",
@@ -1626,6 +1936,19 @@
           "isPublished": {
             "type": "boolean"
           },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "publishedAt": {
             "type": [
               "string",
@@ -1657,6 +1980,9 @@
           "ogImageUrl",
           "tags",
           "isPublished",
+          "isActive",
+          "status",
+          "deletedAt",
           "publishedAt",
           "createdAt",
           "updatedAt"
@@ -2012,8 +2338,10 @@
             "default": 0
           },
           "isActive": {
-            "type": "boolean",
-            "default": true
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           }
         },
         "required": [
@@ -2116,6 +2444,9 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           }
         },
         "additionalProperties": false
@@ -2230,8 +2561,10 @@
             "default": false
           },
           "isActive": {
-            "type": "boolean",
-            "default": true
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           },
           "media": {
             "type": "array",
@@ -2243,6 +2576,9 @@
           },
           "specs": {
             "$ref": "#/components/schemas/ProductSpecs"
+          },
+          "customSpecs": {
+            "$ref": "#/components/schemas/ProductCustomSpecs"
           },
           "lengthCm": {
             "type": [
@@ -2420,6 +2756,9 @@
           "isActive": {
             "type": "boolean"
           },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
+          },
           "media": {
             "type": "array",
             "items": {
@@ -2429,6 +2768,9 @@
           },
           "specs": {
             "$ref": "#/components/schemas/ProductSpecs"
+          },
+          "customSpecs": {
+            "$ref": "#/components/schemas/ProductCustomSpecs"
           },
           "lengthCm": {
             "type": [
@@ -2525,11 +2867,14 @@
         "properties": {
           "isPublished": {
             "type": "boolean"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           }
         },
-        "required": [
-          "isPublished"
-        ],
         "additionalProperties": false
       },
       "CreateArticleBody": {
@@ -2627,6 +2972,12 @@
           "isPublished": {
             "type": "boolean",
             "default": false
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           }
         },
         "required": [
@@ -2726,6 +3077,12 @@
           },
           "isPublished": {
             "type": "boolean"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordStatus"
           }
         },
         "additionalProperties": false
@@ -3111,6 +3468,16 @@
               }
             }
           },
+          "403": {
+            "description": "Account has been deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation failed",
             "content": {
@@ -3163,6 +3530,16 @@
           },
           "401": {
             "description": "Invalid or unverified Google ID token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Account has been deactivated",
             "content": {
               "application/json": {
                 "schema": {
@@ -3238,6 +3615,16 @@
           },
           "401": {
             "description": "Invalid or unverified Google ID token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Account has been deactivated",
             "content": {
               "application/json": {
                 "schema": {
@@ -3361,6 +3748,95 @@
           },
           "401": {
             "description": "Invalid or expired reset token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Auth rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/change-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Change Password",
+        "description": "Verify the current password, update to a new password, and revoke all active refresh token sessions.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Password updated and active sessions revoked"
+          },
+          "401": {
+            "description": "Unauthorized or current password is incorrect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Account has been deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Account has no local password set (Google-only account)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3528,6 +4004,16 @@
               }
             }
           },
+          "403": {
+            "description": "Account has been deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "User record not found",
             "content": {
@@ -3545,7 +4031,7 @@
           "Users"
         ],
         "summary": "Update Current User",
-        "description": "Update the authenticated user display name or E.164 phone number.",
+        "description": "Update the authenticated user name/displayName, E.164 phone number, or address.",
         "security": [
           {
             "BearerAuth": []
@@ -3582,6 +4068,16 @@
               }
             }
           },
+          "403": {
+            "description": "Account has been deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation failed",
             "content": {
@@ -3601,7 +4097,7 @@
           "Users"
         ],
         "summary": "Admin: List Users",
-        "description": "List users with cursor or optional numbered `?page=` pagination, `?q=` fuzzy search, and `?role=` filter.",
+        "description": "List users (active and inactive) with cursor or optional numbered `?page=` pagination, `?q=` fuzzy search, `?role=`, and `?status=` filters.",
         "security": [
           {
             "BearerAuth": []
@@ -3670,6 +4166,44 @@
             "description": "Filter users by role (user or admin)",
             "name": "role",
             "in": "query"
+          },
+          {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "description": "Filter records by lifecycle status (`active` or `inactive`)"
+                }
+              ]
+            },
+            "required": false,
+            "description": "Filter records by lifecycle status (`active` or `inactive`)",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-01"
+            },
+            "required": false,
+            "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-30"
+            },
+            "required": false,
+            "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdTo",
+            "in": "query"
           }
         ],
         "responses": {
@@ -3705,6 +4239,80 @@
           },
           "422": {
             "description": "Invalid query parameters or cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Admin: Create User",
+        "description": "Create a customer or admin/staff user account directly with Argon2id password hashing.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdminUserBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin privileges required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -3762,7 +4370,7 @@
             }
           },
           "403": {
-            "description": "Forbidden (IDOR ownership check failed)",
+            "description": "Forbidden (IDOR ownership check failed or account inactive)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3773,6 +4381,181 @@
           },
           "404": {
             "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid UUID path parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Admin: Update User",
+        "description": "Update user profile (`name`, `email`, `phone`, `address`), role (`customer` | `admin`), or activate/deactivate status (`status: \"active\" | \"inactive\"`). Deactivating or changing role revokes all active refresh tokens.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "01936c8e-7f2a-7000-8000-000000000001"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserStatusBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin privileges required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already exists, cannot deactivate your own account, or cannot demote yourself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Admin: Delete User",
+        "description": "Soft-delete a user (`status = \"inactive\"`, `deletedAt = now()`) and revoke all active refresh tokens. Restorable via `PATCH /v1/users/{id}`.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "01936c8e-7f2a-7000-8000-000000000001"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "User soft-deleted (marked inactive)"
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin privileges required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot deactivate your own account",
             "content": {
               "application/json": {
                 "schema": {
@@ -3817,6 +4600,33 @@
             "required": false,
             "description": "When true, nests subcategories inside root categories under `children`",
             "name": "tree",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter subcategories belonging to a specific parent category UUID"
+            },
+            "required": false,
+            "description": "Filter subcategories belonging to a specific parent category UUID",
+            "name": "parentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "When true returns only top-level categories; when false returns only subcategories"
+            },
+            "required": false,
+            "description": "When true returns only top-level categories; when false returns only subcategories",
+            "name": "rootOnly",
             "in": "query"
           },
           {
@@ -3947,6 +4757,19 @@
             "required": false,
             "name": "limit",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Filter published reviews by exact star rating (1..5)",
+              "example": 5
+            },
+            "required": false,
+            "description": "Filter published reviews by exact star rating (1..5)",
+            "name": "rating",
+            "in": "query"
           }
         ],
         "responses": {
@@ -4068,13 +4891,148 @@
         }
       }
     },
+    "/v1/products/{id}/reviews/me": {
+      "patch": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Update Own Product Review",
+        "description": "Edit the authenticated user’s active review (rating or comment) for a product and recalculate its rating rollup.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOwnReviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Review updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductReviewEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product or active review not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Reviews"
+        ],
+        "summary": "Delete Own Product Review",
+        "description": "Soft-delete the authenticated user’s active review for a product (`status = \"inactive\"`) and recalculate its rating rollup.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Review soft-deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product or active review not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid product ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/products": {
       "get": {
         "tags": [
           "Products"
         ],
         "summary": "List Products",
-        "description": "List and search active products with cursor pagination, category/brand/price filters, and `?q=` fuzzy search.",
+        "description": "List and search active products with cursor pagination, sorting (`?sort=newest|price_asc|price_desc|rating_desc`), category (`categorySlug` or `categoryId`), multi-brand (`brandSlug=perkins,cummins`), price/stock/rating filters, dynamic JSONB `specs` filters (`?specs=rated_power_kva:gte:30,silent_canopy:eq:true`), and `?q=` fuzzy search.",
         "parameters": [
           {
             "schema": {
@@ -4100,25 +5058,53 @@
           {
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 280,
-              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-              "description": "Category or subcategory slug (root categories include all child subcategories)"
+              "enum": [
+                "newest",
+                "price_asc",
+                "price_desc",
+                "rating_desc"
+              ],
+              "default": "newest",
+              "description": "Sort order: newest (default), price_asc, price_desc, or rating_desc",
+              "example": "newest"
             },
             "required": false,
-            "description": "Category or subcategory slug (root categories include all child subcategories)",
-            "name": "categorySlug",
+            "description": "Sort order: newest (default), price_asc, price_desc, or rating_desc",
+            "name": "sort",
             "in": "query"
           },
           {
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64,
+              "maxLength": 280,
               "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-              "example": "perkins"
+              "description": "Category or subcategory slug (root categories include all child subcategories; mutually exclusive with categoryId)"
             },
             "required": false,
+            "description": "Category or subcategory slug (root categories include all child subcategories; mutually exclusive with categoryId)",
+            "name": "categorySlug",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Category or subcategory UUID (root categories include all child subcategories; mutually exclusive with categorySlug)"
+            },
+            "required": false,
+            "description": "Category or subcategory UUID (root categories include all child subcategories; mutually exclusive with categorySlug)",
+            "name": "categoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by one or more comma-separated brand slugs (e.g. `perkins` or `perkins,cummins`)",
+              "example": "perkins,cummins"
+            },
+            "required": false,
+            "description": "Filter by one or more comma-separated brand slugs (e.g. `perkins` or `perkins,cummins`)",
             "name": "brandSlug",
             "in": "query"
           },
@@ -4164,6 +5150,35 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "When true returns products with stock > 0; when false returns out-of-stock items"
+            },
+            "required": false,
+            "description": "When true returns products with stock > 0; when false returns out-of-stock items",
+            "name": "inStock",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Minimum average star rating (1..5, e.g. 4 for 4 stars and up)",
+              "example": 4
+            },
+            "required": false,
+            "description": "Minimum average star rating (1..5, e.g. 4 for 4 stars and up)",
+            "name": "minRating",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": [
                 "integer",
                 "null"
@@ -4184,6 +5199,17 @@
             },
             "required": false,
             "name": "maxPrice",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Dynamic JSONB spec filters as comma-separated `key:op:value` (or `key:value` for `eq`). Operators: `eq`, `gt`, `gte`, `lt`, `lte`, `contains`.",
+              "example": "rated_power_kva:gte:30,silent_canopy:eq:true"
+            },
+            "required": false,
+            "description": "Dynamic JSONB spec filters as comma-separated `key:op:value` (or `key:value` for `eq`). Operators: `eq`, `gt`, `gte`, `lt`, `lte`, `contains`.",
+            "name": "specs",
             "in": "query"
           },
           {
@@ -4354,7 +5380,7 @@
           "Products"
         ],
         "summary": "List Product Spare Parts",
-        "description": "List compatible spare parts for an equipment product with cursor pagination.",
+        "description": "List compatible spare parts for an equipment product with cursor pagination and optional `?q=` fuzzy search.",
         "parameters": [
           {
             "schema": {
@@ -4388,6 +5414,17 @@
             "required": false,
             "description": "Items per page (1..100, default 20)",
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
             "in": "query"
           }
         ],
@@ -4534,6 +5571,17 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid",
+              "description": "Filter published articles linked to this product UUID"
+            },
+            "required": false,
+            "description": "Filter published articles linked to this product UUID",
+            "name": "productId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Fuzzy text search query (supports typos and partial substring matches)",
               "example": "genset perkins"
             },
@@ -4666,7 +5714,7 @@
           "Admin - Catalog"
         ],
         "summary": "Admin: List Categories",
-        "description": "List all non-deleted categories (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.",
+        "description": "List categories (active and inactive) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
@@ -4720,6 +5768,49 @@
             "required": false,
             "description": "Fuzzy text search query (supports typos and partial substring matches)",
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "description": "Filter records by lifecycle status (`active` or `inactive`)"
+                }
+              ]
+            },
+            "required": false,
+            "description": "Filter records by lifecycle status (`active` or `inactive`)",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter subcategories belonging to a specific parent category UUID"
+            },
+            "required": false,
+            "description": "Filter subcategories belonging to a specific parent category UUID",
+            "name": "parentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "When true returns only root categories; when false returns only subcategories"
+            },
+            "required": false,
+            "description": "When true returns only root categories; when false returns only subcategories",
+            "name": "rootOnly",
             "in": "query"
           }
         ],
@@ -4852,6 +5943,81 @@
       }
     },
     "/v1/admin/categories/{id}": {
+      "get": {
+        "tags": [
+          "Admin - Catalog"
+        ],
+        "summary": "Admin: Get Category by ID",
+        "description": "Fetch any category (active or inactive) by ID including parent summary, active subcategories, and merged `effectiveSpecSchema`.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryDetailEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin privileges required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Category not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid category UUID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "Admin - Catalog"
@@ -5022,7 +6188,7 @@
           "Admin - Products"
         ],
         "summary": "Admin: List Products",
-        "description": "List all non-deleted products (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.",
+        "description": "List products (active and inactive) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
@@ -5076,6 +6242,128 @@
             "required": false,
             "description": "Fuzzy text search query (supports typos and partial substring matches)",
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "description": "Filter records by lifecycle status (`active` or `inactive`)"
+                }
+              ]
+            },
+            "required": false,
+            "description": "Filter records by lifecycle status (`active` or `inactive`)",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter products by category UUID"
+            },
+            "required": false,
+            "description": "Filter products by category UUID",
+            "name": "categoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by one or more comma-separated brand slugs (e.g. `perkins` or `perkins,cummins`)",
+              "example": "perkins,cummins"
+            },
+            "required": false,
+            "description": "Filter by one or more comma-separated brand slugs (e.g. `perkins` or `perkins,cummins`)",
+            "name": "brandSlug",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "equipment",
+                "sparepart"
+              ],
+              "description": "Filter products by type (equipment or sparepart)"
+            },
+            "required": false,
+            "description": "Filter products by type (equipment or sparepart)",
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "Filter products by featured flag"
+            },
+            "required": false,
+            "description": "Filter products by featured flag",
+            "name": "isFeatured",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "Filter products by RFQ-only flag"
+            },
+            "required": false,
+            "description": "Filter products by RFQ-only flag",
+            "name": "requiresQuote",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "When true returns products with stock > 0; when false returns stock = 0"
+            },
+            "required": false,
+            "description": "When true returns products with stock > 0; when false returns stock = 0",
+            "name": "inStock",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-01"
+            },
+            "required": false,
+            "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-30"
+            },
+            "required": false,
+            "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdTo",
             "in": "query"
           }
         ],
@@ -5520,7 +6808,7 @@
           "Admin - Reviews"
         ],
         "summary": "Admin: List Reviews",
-        "description": "List all product reviews (published and unpublished) with cursor or optional numbered `?page=` pagination and filters.",
+        "description": "List all product reviews (active/inactive, published/unpublished) with cursor or optional numbered `?page=` pagination and `?status=active|inactive` filter.",
         "security": [
           {
             "BearerAuth": []
@@ -5579,6 +6867,17 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid",
+              "description": "Filter reviews by author user UUID"
+            },
+            "required": false,
+            "description": "Filter reviews by author user UUID",
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "0",
                 "1",
@@ -5602,6 +6901,55 @@
             "required": false,
             "description": "Filter reviews by star rating (1..5)",
             "name": "rating",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Fuzzy text search query (supports typos and partial substring matches)",
+              "example": "genset perkins"
+            },
+            "required": false,
+            "description": "Fuzzy text search query (supports typos and partial substring matches)",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "description": "Filter records by lifecycle status (`active` or `inactive`)"
+                }
+              ]
+            },
+            "required": false,
+            "description": "Filter records by lifecycle status (`active` or `inactive`)",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-01"
+            },
+            "required": false,
+            "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-30"
+            },
+            "required": false,
+            "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdTo",
             "in": "query"
           }
         ],
@@ -5655,7 +7003,7 @@
           "Admin - Reviews"
         ],
         "summary": "Admin: Moderate Review",
-        "description": "Publish or unpublish a product review and recalculate the product rating.",
+        "description": "Publish/unpublish or activate/deactivate (restore) a product review and recalculate the product rating.",
         "security": [
           {
             "BearerAuth": []
@@ -5730,7 +7078,7 @@
           "Admin - Reviews"
         ],
         "summary": "Admin: Delete Review",
-        "description": "Delete a product review and recalculate the product rating.",
+        "description": "Soft-delete a product review (`status = \"inactive\"`, `deletedAt = now()`) and recalculate the product rating. Restorable via `PATCH /v1/admin/reviews/{id}`.",
         "security": [
           {
             "BearerAuth": []
@@ -5790,7 +7138,7 @@
           "Admin - Articles"
         ],
         "summary": "Admin: List Articles",
-        "description": "List all non-deleted articles (including drafts) with cursor or optional numbered `?page=` pagination, `?tag=`, and `?q=` fuzzy search.",
+        "description": "List articles (active, inactive, and drafts) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, `?tag=`, and `?q=` fuzzy search.",
         "security": [
           {
             "BearerAuth": []
@@ -5851,12 +7199,88 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "description": "Filter articles by publication state (true = published, false = draft)"
+            },
+            "required": false,
+            "description": "Filter articles by publication state (true = published, false = draft)",
+            "name": "isPublished",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter articles by author user UUID"
+            },
+            "required": false,
+            "description": "Filter articles by author user UUID",
+            "name": "authorId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Filter articles linked to this product UUID"
+            },
+            "required": false,
+            "description": "Filter articles linked to this product UUID",
+            "name": "productId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "description": "Fuzzy text search query (supports typos and partial substring matches)",
               "example": "genset perkins"
             },
             "required": false,
             "description": "Fuzzy text search query (supports typos and partial substring matches)",
             "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/RecordStatus"
+                },
+                {
+                  "description": "Filter records by lifecycle status (`active` or `inactive`)"
+                }
+              ]
+            },
+            "required": false,
+            "description": "Filter records by lifecycle status (`active` or `inactive`)",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-01"
+            },
+            "required": false,
+            "description": "Filter records created on or after this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+              "example": "2026-11-30"
+            },
+            "required": false,
+            "description": "Filter records created on or before this ISO 8601 date (YYYY-MM-DD) or datetime",
+            "name": "createdTo",
             "in": "query"
           }
         ],

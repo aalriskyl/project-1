@@ -2,14 +2,15 @@ import type { ArticleRow } from '@/db/schema/articles.ts';
 import { NotFoundError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import {
-  assertCursorOrPage,
-  buildOffsetPage,
+  buildCursorPage,
   type CursorPage,
   decodeCursor,
   encodeCursor,
+  paginateAdminList,
 } from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { slugify } from '@/lib/slug.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type {
   ArticlesRepository,
@@ -64,6 +65,9 @@ export function serializeArticleSummary(row: ArticleSummaryRow): ArticleSummary 
     ogImageUrl: row.ogImageUrl,
     tags: [...row.tags],
     isPublished: row.isPublished,
+    isActive: isRecordActive(row),
+    status: toRecordStatus(row),
+    deletedAt: row.deletedAt !== null ? row.deletedAt.toISOString() : null,
     publishedAt: row.publishedAt !== null ? row.publishedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -105,28 +109,16 @@ export function createArticlesService(
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
         ...(query.tag !== undefined ? { tag: query.tag } : {}),
+        ...(query.productId !== undefined ? { productId: query.productId } : {}),
         ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor =
-        hasMore && lastItem !== undefined
-          ? encodeCursor({
-              createdAt: lastItem.publishedAt ?? lastItem.createdAt,
-              id: lastItem.id,
-            })
-          : null;
-
-      return {
-        data: pageItems.map(serializeArticleSummary),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
-      };
+      return buildCursorPage(rows, query.limit, serializeArticleSummary, (lastItem) =>
+        encodeCursor({
+          createdAt: lastItem.publishedAt ?? lastItem.createdAt,
+          id: lastItem.id,
+        }),
+      );
     },
 
     async getPublishedArticleBySlug(slug: string, query: GetArticleQuery): Promise<ArticleDetail> {
@@ -152,43 +144,30 @@ export function createArticlesService(
       query: ListAdminArticlesQuery,
     ): Promise<CursorPage<ArticleSummary>> {
       assertAdminUser(actor);
-      assertCursorOrPage(query);
 
-      if (query.page !== undefined) {
-        const offset = (query.page - 1) * query.limit;
-        const { items, total } = await articlesRepo.listAdminOffset({
-          limit: query.limit,
-          offset,
-          ...(query.tag !== undefined ? { tag: query.tag } : {}),
-          ...(query.q !== undefined ? { query: query.q } : {}),
-        });
-        return buildOffsetPage(items.map(serializeArticleSummary), total, query.page, query.limit);
-      }
-
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
-      const rows = await articlesRepo.listAdminCursor({
-        limit: query.limit + 1,
-        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+      const filters = {
         ...(query.tag !== undefined ? { tag: query.tag } : {}),
+        ...(query.isPublished !== undefined ? { isPublished: query.isPublished } : {}),
+        ...(query.authorId !== undefined ? { authorId: query.authorId } : {}),
+        ...(query.productId !== undefined ? { productId: query.productId } : {}),
         ...(query.q !== undefined ? { query: query.q } : {}),
-      });
-
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor =
-        hasMore && lastItem !== undefined
-          ? encodeCursor({ createdAt: lastItem.createdAt, id: lastItem.id })
-          : null;
-
-      return {
-        data: pageItems.map(serializeArticleSummary),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
+        ...(query.status !== undefined ? { status: query.status } : {}),
+        ...(query.createdFrom !== undefined ? { createdFrom: query.createdFrom } : {}),
+        ...(query.createdTo !== undefined ? { createdTo: query.createdTo } : {}),
       };
+
+      return paginateAdminList({
+        query,
+        listOffset: ({ limit, offset }) =>
+          articlesRepo.listAdminOffset({ limit, offset, ...filters }),
+        listCursor: ({ limit, cursor }) =>
+          articlesRepo.listAdminCursor({
+            limit,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...filters,
+          }),
+        serialize: serializeArticleSummary,
+      });
     },
 
     async getAdminArticleById(actor: AuthUser, id: string): Promise<ArticleDetail> {
@@ -204,6 +183,7 @@ export function createArticlesService(
     async createArticle(actor: AuthUser, input: CreateArticleBody): Promise<ArticleDetail> {
       assertAdminUser(actor);
 
+      const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.title, 260);
       const publishedAt = input.isPublished ? new Date() : null;
 
@@ -224,10 +204,12 @@ export function createArticlesService(
         tags: input.tags,
         relatedProductIds: input.relatedProductIds,
         isPublished: input.isPublished,
+        isActive: resolvedActive,
+        deletedAt: resolvedActive ? null : new Date(),
         publishedAt,
       });
 
-      if (created.isPublished) {
+      if (created.isPublished && isRecordActive(created)) {
         revalidator.notify(['articles', `article:${created.slug}`, 'sitemap']);
       }
 
@@ -245,6 +227,15 @@ export function createArticlesService(
       if (existing === null) {
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
       }
+
+      const nextActive = resolveActiveStateInput(input);
+      const activePatch =
+        nextActive !== undefined
+          ? {
+              isActive: nextActive,
+              deletedAt: nextActive ? null : (existing.deletedAt ?? new Date()),
+            }
+          : {};
 
       const nextPublished = input.isPublished ?? existing.isPublished;
       const nextPublishedAt =
@@ -269,6 +260,7 @@ export function createArticlesService(
         ...(input.isPublished !== undefined
           ? { isPublished: input.isPublished, publishedAt: nextPublishedAt }
           : {}),
+        ...activePatch,
       });
 
       if (updated === null) {
@@ -293,7 +285,7 @@ export function createArticlesService(
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
       }
 
-      await articlesRepo.softDeleteById(id, new Date());
+      await articlesRepo.softDeleteById(id, existing.deletedAt ?? new Date());
       revalidator.notify(['articles', `article:${existing.slug}`, 'sitemap']);
     },
   };

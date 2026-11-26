@@ -5,15 +5,60 @@ order: 1000
 queryParams:
   - key: limit
     value: '20'
+  - key: sort
+    value: price_asc
+    disabled: true
+    description: Sort order (newest, price_asc, price_desc, rating_desc)
   - key: categorySlug
     value: genset-silent
     disabled: true
-  - key: brandSlug
-    value: perkins
+  - key: categoryId
+    value: '{{categoryId}}'
     disabled: true
+    description: Optional category UUID filter (mutually exclusive with categorySlug)
+  - key: brandSlug
+    value: perkins,cummins
+    disabled: true
+    description: Optional single or comma-separated brand slugs
+  - key: type
+    value: equipment
+    disabled: true
+    description: Optional product type filter (equipment or sparepart)
+  - key: isFeatured
+    value: 'true'
+    disabled: true
+    description: Optional featured flag filter
+  - key: requiresQuote
+    value: 'false'
+    disabled: true
+    description: Optional RFQ-only flag filter
+  - key: inStock
+    value: 'true'
+    disabled: true
+    description: Optional stock filter (true for stock > 0, false for stock = 0)
+  - key: minRating
+    value: '4'
+    disabled: true
+    description: Optional minimum average star rating (1..5)
+  - key: minPrice
+    value: '1000000'
+    disabled: true
+    description: Optional minimum price in IDR
+  - key: maxPrice
+    value: '300000000'
+    disabled: true
+    description: Optional maximum price in IDR
+  - key: specs
+    value: 'rated_power_kva:gte:30,silent_canopy:eq:true'
+    disabled: true
+    description: 'Dynamic JSONB spec filters (comma-separated key:op:value; ops eq, gt, gte, lt, lte, contains)'
   - key: q
     value: TPG30
     disabled: true
+  - key: cursor
+    value: ''
+    disabled: true
+    description: Next page cursor returned from previous response meta.nextCursor
 scripts:
   - type: afterResponse
     language: text/javascript

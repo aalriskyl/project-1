@@ -9,6 +9,10 @@ pathVariables:
 queryParams:
   - key: limit
     value: '20'
+  - key: q
+    value: oil filter
+    disabled: true
+    description: Optional fuzzy search query over compatible spare parts
   - key: cursor
     value: ''
     disabled: true

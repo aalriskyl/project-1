@@ -5,7 +5,7 @@ order: 6100
 pathVariables:
   - key: id
     value: '{{reviewId}}'
-    description: Product review UUIDv7
+    description: Product review UUIDv7 (soft-deletes to status=inactive and recalculates rating; restorable via PATCH)
 scripts:
   - type: afterResponse
     language: text/javascript

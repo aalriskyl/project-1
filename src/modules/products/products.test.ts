@@ -101,6 +101,25 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     });
     expect(badSpecsRes.status).toBe(422);
 
+    // 2b. Reject duplicate labels in customSpecs (case-insensitive)
+    const dupCustomSpecsRes = await testApp.request('/v1/admin/products', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        categoryId: subCat.id,
+        name: 'Duplicate Custom Spec Genset',
+        priceIdr: 150_000_000,
+        customSpecs: [
+          { label: 'Alternator', value: 'Stamford' },
+          { label: 'alternator', value: 'Leroy Somer' },
+        ],
+      }),
+    });
+    expect(dupCustomSpecsRes.status).toBe(422);
+
     // 3. Create 2 gensets + 1 sparepart oil filter
     const prod1Res = await testApp.request('/v1/admin/products', {
       method: 'POST',
@@ -134,6 +153,10 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
           silent_canopy: true,
           engine_model: 'Perkins 1103A-33G',
         },
+        customSpecs: [
+          { label: 'Alternator', value: 'Stamford UCI224D' },
+          { label: 'Noise Level', value: '68', unit: 'dB @ 7m' },
+        ],
       }),
     });
     expect(prod1Res.status).toBe(201);
@@ -141,6 +164,31 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     // primaryImageUrl auto-syncs to first 'image' item (skipping leading video)
     expect(prod1.primaryImageUrl).toBe('https://cdn.tsuzumi.test/products/tpg30-main.webp');
     expect(prod1.dimensions.weightKg).toBe(920.5);
+    expect(prod1.customSpecs).toEqual([
+      { label: 'Alternator', value: 'Stamford UCI224D' },
+      { label: 'Noise Level', value: '68', unit: 'dB @ 7m' },
+    ]);
+
+    // Update customSpecs via PATCH
+    const patchCustomSpecsRes = await testApp.request(`/v1/admin/products/${prod1.id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        customSpecs: [
+          { label: 'Alternator', value: 'Stamford UCI224D' },
+          { label: 'Control Panel', value: 'DeepSea DSE4520' },
+        ],
+      }),
+    });
+    expect(patchCustomSpecsRes.status).toBe(200);
+    const patchedProd1 = ProductDetailEnvelopeSchema.parse(await patchCustomSpecsRes.json()).data;
+    expect(patchedProd1.customSpecs).toEqual([
+      { label: 'Alternator', value: 'Stamford UCI224D' },
+      { label: 'Control Panel', value: 'DeepSea DSE4520' },
+    ]);
 
     const prod2Res = await testApp.request('/v1/admin/products', {
       method: 'POST',
@@ -224,6 +272,121 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     const rootFilterPage = ProductCursorPageSchema.parse(await rootFilterRes.json());
     expect(rootFilterPage.data).toHaveLength(3);
 
+    // Public sorting (?sort=price_asc & price_desc) with keyset cursor pagination + sort mismatch 422
+    const priceAscP1 = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?sort=price_asc&limit=2')).json(),
+    );
+    expect(priceAscP1.data.map((p) => p.priceIdr)).toEqual([285_000, 177_500_000]);
+    expect(priceAscP1.meta.hasMore).toBe(true);
+
+    const priceAscP2 = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request(
+          `/v1/products?sort=price_asc&limit=2&cursor=${encodeURIComponent(priceAscP1.meta.nextCursor ?? '')}`,
+        )
+      ).json(),
+    );
+    expect(priceAscP2.data.map((p) => p.priceIdr)).toEqual([235_000_000]);
+    expect(priceAscP2.meta.hasMore).toBe(false);
+
+    const sortMismatchRes = await testApp.request(
+      `/v1/products?sort=price_desc&cursor=${encodeURIComponent(priceAscP1.meta.nextCursor ?? '')}`,
+    );
+    expect(sortMismatchRes.status).toBe(422);
+
+    const priceDesc = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?sort=price_desc')).json(),
+    );
+    expect(priceDesc.data.map((p) => p.priceIdr)).toEqual([235_000_000, 177_500_000, 285_000]);
+
+    // Admin product filters (?categoryId=, ?brandSlug=, ?type=, ?requiresQuote=, ?inStock=, ?isFeatured=)
+    const adminSpareparts = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request(
+          `/v1/admin/products?categoryId=${rootCat.id}&brandSlug=perkins&type=sparepart&requiresQuote=false&inStock=true`,
+          {
+            headers: { Authorization: `Bearer ${adminToken}` },
+          },
+        )
+      ).json(),
+    );
+    expect(adminSpareparts.data).toHaveLength(1);
+    expect(adminSpareparts.data[0]?.id).toBe(filterPart.id);
+
+    // Public ?inStock=false returns 0 items (all 3 have stock > 0); ?minRating=4 returns 0 (unrated yet)
+    const outOfStockRes = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?inStock=false')).json(),
+    );
+    expect(outOfStockRes.data).toHaveLength(0);
+
+    const inStockRes = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?inStock=true')).json(),
+    );
+    expect(inStockRes.data).toHaveLength(3);
+
+    const minRatingRes = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?minRating=4')).json(),
+    );
+    expect(minRatingRes.data).toHaveLength(0);
+
+    // 6b. Public categoryId filter (root includes children), mutually exclusive categoryId+categorySlug -> 422,
+    // multi-value brandSlug=perkins,cummins, dynamic JSONB specs filter, and spareparts ?q= search
+    const byCatIdPage = ProductCursorPageSchema.parse(
+      await (await testApp.request(`/v1/products?categoryId=${rootCat.id}`)).json(),
+    );
+    expect(byCatIdPage.data).toHaveLength(3);
+
+    expect(
+      (await testApp.request(`/v1/products?categoryId=${rootCat.id}&categorySlug=genset-silent`))
+        .status,
+    ).toBe(422);
+
+    const multiBrandPage = ProductCursorPageSchema.parse(
+      await (await testApp.request('/v1/products?brandSlug=perkins,cummins')).json(),
+    );
+    expect(multiBrandPage.data).toHaveLength(3);
+
+    const specsGte40 = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request(
+          '/v1/products?specs=rated_power_kva:gte:40,silent_canopy:eq:true,engine_model:contains:1103A',
+        )
+      ).json(),
+    );
+    expect(specsGte40.data).toHaveLength(1);
+    expect(specsGte40.data[0]?.id).toBe(prod2.id);
+
+    expect((await testApp.request('/v1/products?specs=rated_power_kva:badop:30')).status).toBe(422);
+
+    const sparepartHit = ProductCursorPageSchema.parse(
+      await (await testApp.request(`/v1/products/${prod1.id}/spareparts?q=oil%20filter`)).json(),
+    );
+    expect(sparepartHit.data).toHaveLength(1);
+    expect(sparepartHit.data[0]?.id).toBe(filterPart.id);
+
+    const sparepartMiss = ProductCursorPageSchema.parse(
+      await (await testApp.request(`/v1/products/${prod1.id}/spareparts?q=radiator`)).json(),
+    );
+    expect(sparepartMiss.data).toHaveLength(0);
+
+    // Admin date-range filter: invalid range -> 422; future range -> 0 items
+    expect(
+      (
+        await testApp.request('/v1/admin/products?createdFrom=2030-01-10&createdTo=2030-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(422);
+
+    const futureAdminProds = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/products?createdFrom=2099-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(futureAdminProds.data).toHaveLength(0);
+
     // SKU search & typo-tolerant fuzzy search ('gensset perkns')
     const skuSearchRes = await testApp.request('/v1/products?q=TPG30');
     const skuSearchPage = ProductCursorPageSchema.parse(await skuSearchRes.json());
@@ -246,7 +409,17 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     expect(detail.related).toHaveLength(1);
     expect(detail.related?.[0]?.id).toBe(prod2.id);
 
-    // 8. Batched /v1/products/compare aligns specSchema + preserves requested slug order
+    // 8. Batched /v1/products/compare aligns specSchema + preserves requested order for both ?ids= and ?slugs=
+    const compareByIdsRes = await testApp.request(
+      `/v1/products/compare?ids=${prod1.id},${prod2.id}`,
+    );
+    expect(compareByIdsRes.status).toBe(200);
+    const comparedByIds = CompareProductsEnvelopeSchema.parse(await compareByIdsRes.json()).data;
+    expect(comparedByIds.specSchema).toHaveLength(3);
+    expect(comparedByIds.products[0]?.id).toBe(prod1.id);
+    expect(comparedByIds.products[0]?.customSpecs).toHaveLength(2);
+    expect(comparedByIds.products[1]?.id).toBe(prod2.id);
+
     const compareRes = await testApp.request(
       `/v1/products/compare?slugs=${prod2.slug},${prod1.slug}`,
     );
@@ -280,5 +453,36 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     const sitemapRes = await testApp.request('/v1/seo/sitemap');
     const sitemap = SitemapResponseSchema.parse(await sitemapRes.json()).data;
     expect(sitemap.products).toHaveLength(3);
+
+    // 10. Soft-delete marks product inactive (hidden from public, filterable in admin, restorable via PATCH)
+    const delProdRes = await testApp.request(`/v1/admin/products/${prod2.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(delProdRes.status).toBe(204);
+    expect((await testApp.request(`/v1/products/${prod2.slug}`)).status).toBe(404);
+
+    const inactiveProds = ProductCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/products?status=inactive', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(inactiveProds.data).toHaveLength(1);
+    expect(inactiveProds.data[0]?.id).toBe(prod2.id);
+    expect(inactiveProds.data[0]?.status).toBe('inactive');
+    expect(inactiveProds.data[0]?.deletedAt).not.toBeNull();
+
+    const restoreProdRes = await testApp.request(`/v1/admin/products/${prod2.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    expect(restoreProdRes.status).toBe(200);
+    const restoredProd = ProductDetailEnvelopeSchema.parse(await restoreProdRes.json()).data;
+    expect(restoredProd.status).toBe('active');
+    expect(restoredProd.deletedAt).toBeNull();
+    expect((await testApp.request(`/v1/products/${prod2.slug}`)).status).toBe(200);
   });
 });

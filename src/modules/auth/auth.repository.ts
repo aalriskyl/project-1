@@ -1,10 +1,10 @@
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
-import postgres from 'postgres';
 import type { Database } from '@/db/client.ts';
+import { mailOutbox, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
 import { passwordResetTokens } from '@/db/schema/password-reset-tokens.ts';
 import { refreshTokens } from '@/db/schema/refresh-tokens.ts';
 import { users } from '@/db/schema/users.ts';
-import { mailOutbox, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
+import { isUniqueViolation } from '@/lib/db-helpers.ts';
 import { ConflictError } from '@/lib/errors.ts';
 import type { UserEntity, UserWithCredentials } from '@/modules/users/users.repository.ts';
 import type { UserRole } from '@/types/app.ts';
@@ -15,6 +15,7 @@ export interface NewUserInput {
   readonly passwordHash: string | null;
   readonly googleSub?: string | null;
   readonly phone?: string | null;
+  readonly address?: string | null;
   readonly displayName: string;
   readonly role: UserRole;
 }
@@ -51,6 +52,7 @@ export interface RefreshTokenWithUser {
 }
 
 export interface AuthRepository {
+  findUserByIdWithCredentials(id: string): Promise<UserWithCredentials | null>;
   findUserByEmailWithCredentials(email: string): Promise<UserWithCredentials | null>;
   findUserByGoogleSub(googleSub: string): Promise<UserEntity | null>;
   createUserWithRefreshToken(params: {
@@ -80,20 +82,15 @@ export interface AuthRepository {
     readonly passwordHash: string;
     readonly now: Date;
   }): Promise<boolean>;
+  updatePasswordAndRevokeSessions(params: {
+    readonly userId: string;
+    readonly passwordHash: string;
+    readonly now: Date;
+  }): Promise<boolean>;
 }
 
 function normalizeRole(rawRole: string): UserRole {
   return rawRole === 'admin' ? 'admin' : 'user';
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  if (err instanceof postgres.PostgresError && err.code === '23505') {
-    return true;
-  }
-  if (typeof err === 'object' && err !== null && 'cause' in err) {
-    return isUniqueViolation(err.cause);
-  }
-  return false;
 }
 
 export function createAuthRepository(db: Database): AuthRepository {
@@ -101,13 +98,47 @@ export function createAuthRepository(db: Database): AuthRepository {
     id: users.id,
     email: users.email,
     phone: users.phone,
+    address: users.address,
     displayName: users.displayName,
     role: users.role,
+    isActive: users.isActive,
     createdAt: users.createdAt,
     updatedAt: users.updatedAt,
+    deletedAt: users.deletedAt,
   };
 
   return {
+    async findUserByIdWithCredentials(id: string): Promise<UserWithCredentials | null> {
+      const [row] = await db
+        .select({
+          ...userPublicCols,
+          passwordHash: users.passwordHash,
+          googleSub: users.googleSub,
+        })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+
+      if (row === undefined) {
+        return null;
+      }
+
+      return {
+        id: row.id,
+        email: row.email,
+        phone: row.phone,
+        address: row.address,
+        displayName: row.displayName,
+        role: normalizeRole(row.role),
+        isActive: row.isActive,
+        passwordHash: row.passwordHash,
+        googleSub: row.googleSub,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        deletedAt: row.deletedAt,
+      };
+    },
+
     async findUserByEmailWithCredentials(email: string): Promise<UserWithCredentials | null> {
       const normalized = email.trim().toLowerCase();
       const [row] = await db
@@ -128,12 +159,15 @@ export function createAuthRepository(db: Database): AuthRepository {
         id: row.id,
         email: row.email,
         phone: row.phone,
+        address: row.address,
         displayName: row.displayName,
         role: normalizeRole(row.role),
+        isActive: row.isActive,
         passwordHash: row.passwordHash,
         googleSub: row.googleSub,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
+        deletedAt: row.deletedAt,
       };
     },
 
@@ -152,10 +186,13 @@ export function createAuthRepository(db: Database): AuthRepository {
         id: row.id,
         email: row.email,
         phone: row.phone,
+        address: row.address,
         displayName: row.displayName,
         role: normalizeRole(row.role),
+        isActive: row.isActive,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
+        deletedAt: row.deletedAt,
       };
     },
 
@@ -170,6 +207,7 @@ export function createAuthRepository(db: Database): AuthRepository {
               passwordHash: user.passwordHash,
               googleSub: user.googleSub ?? null,
               phone: user.phone ?? null,
+              address: user.address ?? null,
               displayName: user.displayName,
               role: user.role,
             })
@@ -191,10 +229,13 @@ export function createAuthRepository(db: Database): AuthRepository {
             id: created.id,
             email: created.email,
             phone: created.phone,
+            address: created.address,
             displayName: created.displayName,
             role: normalizeRole(created.role),
+            isActive: created.isActive,
             createdAt: created.createdAt,
             updatedAt: created.updatedAt,
+            deletedAt: created.deletedAt,
           };
         });
       } catch (err) {
@@ -221,6 +262,8 @@ export function createAuthRepository(db: Database): AuthRepository {
             .where(
               and(
                 eq(users.id, userId),
+                eq(users.isActive, true),
+                isNull(users.deletedAt),
                 or(isNull(users.googleSub), eq(users.googleSub, googleSub)),
               ),
             )
@@ -245,10 +288,13 @@ export function createAuthRepository(db: Database): AuthRepository {
             id: updated.id,
             email: updated.email,
             phone: updated.phone,
+            address: updated.address,
             displayName: updated.displayName,
             role: normalizeRole(updated.role),
+            isActive: updated.isActive,
             createdAt: updated.createdAt,
             updatedAt: updated.updatedAt,
+            deletedAt: updated.deletedAt,
           };
         });
       } catch (err) {
@@ -302,10 +348,13 @@ export function createAuthRepository(db: Database): AuthRepository {
           id: row.user.id,
           email: row.user.email,
           phone: row.user.phone,
+          address: row.user.address,
           displayName: row.user.displayName,
           role: normalizeRole(row.user.role),
+          isActive: row.user.isActive,
           createdAt: row.user.createdAt,
           updatedAt: row.user.updatedAt,
+          deletedAt: row.user.deletedAt,
         },
       };
     },
@@ -388,10 +437,17 @@ export function createAuthRepository(db: Database): AuthRepository {
           return false;
         }
 
-        await tx
+        const [updatedUser] = await tx
           .update(users)
           .set({ passwordHash, updatedAt: now })
-          .where(eq(users.id, consumed.userId));
+          .where(
+            and(eq(users.id, consumed.userId), eq(users.isActive, true), isNull(users.deletedAt)),
+          )
+          .returning({ id: users.id });
+
+        if (updatedUser === undefined) {
+          return false;
+        }
 
         // Revoke all active sessions and any remaining unused reset tokens for this user.
         await tx
@@ -408,6 +464,27 @@ export function createAuthRepository(db: Database): AuthRepository {
               isNull(passwordResetTokens.usedAt),
             ),
           );
+
+        return true;
+      });
+    },
+
+    async updatePasswordAndRevokeSessions({ userId, passwordHash, now }): Promise<boolean> {
+      return db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(users)
+          .set({ passwordHash, updatedAt: now })
+          .where(and(eq(users.id, userId), eq(users.isActive, true), isNull(users.deletedAt)))
+          .returning({ id: users.id });
+
+        if (updated === undefined) {
+          return false;
+        }
+
+        await tx
+          .update(refreshTokens)
+          .set({ revokedAt: now })
+          .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
 
         return true;
       });

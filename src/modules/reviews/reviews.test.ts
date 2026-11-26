@@ -127,6 +127,41 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     const listPage = ProductReviewCursorPageSchema.parse(await listRes.json());
     expect(listPage.data).toHaveLength(2);
 
+    // Public review star-rating filter (?rating=4)
+    const fourStarRes = await testApp.request(`/v1/products/${prod.id}/reviews?rating=4`);
+    expect(fourStarRes.status).toBe(200);
+    const fourStarPage = ProductReviewCursorPageSchema.parse(await fourStarRes.json());
+    expect(fourStarPage.data).toHaveLength(1);
+    expect(fourStarPage.data[0]?.id).toBe(rev2.id);
+
+    // Admin review filters (?userId=, ?q=)
+    const adminByUser = ProductReviewCursorPageSchema.parse(
+      await (
+        await testApp.request(`/v1/admin/reviews?userId=${rev2.userId}&q=cepat`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminByUser.data).toHaveLength(1);
+    expect(adminByUser.data[0]?.id).toBe(rev2.id);
+
+    expect(
+      (
+        await testApp.request('/v1/admin/reviews?createdFrom=2030-05-01&createdTo=2030-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(422);
+
+    const futureReviews = ProductReviewCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/reviews?createdFrom=2099-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(futureReviews.data).toHaveLength(0);
+
     const prodAfter2 = ProductDetailEnvelopeSchema.parse(
       await (await testApp.request(`/v1/products/${prod.slug}`)).json(),
     ).data;
@@ -159,7 +194,7 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     expect(adminUnpubList.meta.total).toBe(1);
     expect(adminUnpubList.meta.totalPages).toBe(1);
 
-    // Admin deletes Buyer 1's review -> ratingAvg resets to 0, reviewCount = 0
+    // Admin soft-deletes Buyer 1's review -> status='inactive', ratingAvg resets to 0, reviewCount = 0
     const delRes = await testApp.request(`/v1/admin/reviews/${rev1.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -171,5 +206,74 @@ describe('Product Reviews & transactional rating rollups (/v1/products/:id/revie
     ).data;
     expect(prodAfterDel.ratingAvg).toBe(0);
     expect(prodAfterDel.reviewCount).toBe(0);
+
+    // Soft-deleted review remains visible in admin ?status=inactive and can be restored via PATCH
+    const inactiveReviews = ProductReviewCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/reviews?status=inactive', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(inactiveReviews.data).toHaveLength(1);
+    expect(inactiveReviews.data[0]?.id).toBe(rev1.id);
+    expect(inactiveReviews.data[0]?.status).toBe('inactive');
+    expect(inactiveReviews.data[0]?.deletedAt).not.toBeNull();
+
+    const restoreRevRes = await testApp.request(`/v1/admin/reviews/${rev1.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active', isPublished: true }),
+    });
+    expect(restoreRevRes.status).toBe(200);
+    const restoredRev = ProductReviewEnvelopeSchema.parse(await restoreRevRes.json()).data;
+    expect(restoredRev.status).toBe('active');
+    expect(restoredRev.deletedAt).toBeNull();
+
+    const prodAfterRestore = ProductDetailEnvelopeSchema.parse(
+      await (await testApp.request(`/v1/products/${prod.slug}`)).json(),
+    ).data;
+    expect(prodAfterRestore.ratingAvg).toBe(5);
+    expect(prodAfterRestore.reviewCount).toBe(1);
+
+    // Customer edits own review via PATCH /v1/products/:id/reviews/me -> ratingAvg recalculates to 3
+    const editOwnRes = await testApp.request(`/v1/products/${prod.id}/reviews/me`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${buyer1Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: 3, comment: 'Updated after heavy usage.' }),
+    });
+    expect(editOwnRes.status).toBe(200);
+    const editedOwn = ProductReviewEnvelopeSchema.parse(await editOwnRes.json()).data;
+    expect(editedOwn.rating).toBe(3);
+    expect(editedOwn.comment).toBe('Updated after heavy usage.');
+
+    const prodAfterOwnEdit = ProductDetailEnvelopeSchema.parse(
+      await (await testApp.request(`/v1/products/${prod.slug}`)).json(),
+    ).data;
+    expect(prodAfterOwnEdit.ratingAvg).toBe(3);
+    expect(prodAfterOwnEdit.reviewCount).toBe(1);
+
+    // Customer soft-deletes own review via DELETE /v1/products/:id/reviews/me -> ratingAvg resets to 0
+    const delOwnRes = await testApp.request(`/v1/products/${prod.id}/reviews/me`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${buyer1Token}` },
+    });
+    expect(delOwnRes.status).toBe(204);
+
+    const prodAfterOwnDel = ProductDetailEnvelopeSchema.parse(
+      await (await testApp.request(`/v1/products/${prod.slug}`)).json(),
+    ).data;
+    expect(prodAfterOwnDel.ratingAvg).toBe(0);
+    expect(prodAfterOwnDel.reviewCount).toBe(0);
+
+    // Deleting again returns 404 (no active own review left)
+    expect(
+      (
+        await testApp.request(`/v1/products/${prod.id}/reviews/me`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${buyer1Token}` },
+        })
+      ).status,
+    ).toBe(404);
   });
 });

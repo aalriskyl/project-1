@@ -1,0 +1,33 @@
+$kind: http-request
+name: 'Create User (Admin)'
+method: POST
+url: '{{baseUrl}}/v1/users'
+order: 4500
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "staff.member@tsuzumi.test",
+      "password": "staff-strong-passphrase-2026",
+      "name": "Staff Member",
+      "phone": "+6281234567890",
+      "address": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat",
+      "role": "admin"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201 Created', () => {
+        pm.response.to.have.status(201);
+      });
+      if (pm.response.code === 201) {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        if (json.data?.id) {
+          pm.environment.set('userId', json.data.id);
+        }
+      }

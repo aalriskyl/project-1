@@ -1,0 +1,35 @@
+$kind: http-request
+name: 'Update User (Admin)'
+method: PATCH
+url: '{{baseUrl}}/v1/users/:id'
+order: 5000
+headers:
+  - key: Content-Type
+    value: application/json
+pathVariables:
+  - key: id
+    value: '{{userId}}'
+    description: Target user UUIDv7
+body:
+  type: json
+  content: |-
+    {
+      "name": "Ada Byron",
+      "email": "ada.byron@example.com",
+      "phone": "+6281234567890",
+      "address": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat",
+      "role": "admin",
+      "status": "active"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns updated user fields', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(['active', 'inactive']).to.include(json.data.status);
+      });

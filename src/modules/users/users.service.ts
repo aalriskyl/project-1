@@ -1,13 +1,17 @@
-import { ForbiddenError, NotFoundError } from '@/lib/errors.ts';
-import {
-  assertCursorOrPage,
-  buildOffsetPage,
-  type CursorPage,
-  decodeCursor,
-  encodeCursor,
-} from '@/lib/pagination.ts';
+import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/errors.ts';
+import { generateId } from '@/lib/id.ts';
+import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
+import { hashPassword } from '@/lib/password.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
+import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { UserEntity, UsersRepository } from '@/modules/users/users.repository.ts';
-import type { ListUsersQuery, PublicUser, UpdateMeBody } from '@/modules/users/users.schema.ts';
+import type {
+  CreateAdminUserBody,
+  ListUsersQuery,
+  PublicUser,
+  UpdateMeBody,
+  UpdateUserStatusBody,
+} from '@/modules/users/users.schema.ts';
 import type { AuthUser } from '@/types/app.ts';
 
 export interface UsersService {
@@ -15,15 +19,27 @@ export interface UsersService {
   updateMe(actor: AuthUser, input: UpdateMeBody): Promise<PublicUser>;
   getUserById(actor: AuthUser, targetUserId: string): Promise<PublicUser>;
   listUsers(actor: AuthUser, query: ListUsersQuery): Promise<CursorPage<PublicUser>>;
+  createUser(actor: AuthUser, input: CreateAdminUserBody): Promise<PublicUser>;
+  updateUserStatus(
+    actor: AuthUser,
+    targetUserId: string,
+    input: UpdateUserStatusBody,
+  ): Promise<PublicUser>;
+  deleteUser(actor: AuthUser, targetUserId: string): Promise<void>;
 }
 
 export function serializeUser(entity: UserEntity): PublicUser {
   return {
     id: entity.id,
     email: entity.email,
-    phone: entity.phone,
+    name: entity.displayName,
     displayName: entity.displayName,
+    phone: entity.phone,
+    address: entity.address,
     role: entity.role,
+    isActive: isRecordActive(entity),
+    status: toRecordStatus(entity),
+    deletedAt: entity.deletedAt !== null ? entity.deletedAt.toISOString() : null,
     createdAt: entity.createdAt.toISOString(),
     updatedAt: entity.updatedAt.toISOString(),
   };
@@ -36,13 +52,26 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
       if (user === null) {
         throw new NotFoundError('User not found', 'USER_NOT_FOUND');
       }
+      if (!isRecordActive(user)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
       return serializeUser(user);
     },
 
     async updateMe(actor: AuthUser, input: UpdateMeBody): Promise<PublicUser> {
+      const existing = await usersRepo.findById(actor.id);
+      if (existing === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
+      if (!isRecordActive(existing)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
+
+      const nextName = input.name ?? input.displayName;
       const updated = await usersRepo.updateProfile(actor.id, {
-        ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+        ...(nextName !== undefined ? { displayName: nextName } : {}),
         ...(input.phone !== undefined ? { phone: input.phone } : {}),
+        ...(input.address !== undefined ? { address: input.address } : {}),
       });
       if (updated === null) {
         throw new NotFoundError('User not found', 'USER_NOT_FOUND');
@@ -60,6 +89,9 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
       if (user === null) {
         throw new NotFoundError('User not found', 'USER_NOT_FOUND');
       }
+      if (actor.role !== 'admin' && !isRecordActive(user)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
       return serializeUser(user);
     },
 
@@ -68,40 +100,112 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
         throw new ForbiddenError('Admin privileges required to list users', 'USER_FORBIDDEN');
       }
 
-      assertCursorOrPage(query);
-
-      if (query.page !== undefined) {
-        const offset = (query.page - 1) * query.limit;
-        const { items, total } = await usersRepo.listOffset({
-          limit: query.limit,
-          offset,
-          ...(query.q !== undefined ? { query: query.q } : {}),
-          ...(query.role !== undefined ? { role: query.role } : {}),
-        });
-        return buildOffsetPage(items.map(serializeUser), total, query.page, query.limit);
-      }
-
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
-      const rows = await usersRepo.listCursor({
-        limit: query.limit + 1,
-        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+      const filters = {
         ...(query.q !== undefined ? { query: query.q } : {}),
         ...(query.role !== undefined ? { role: query.role } : {}),
+        ...(query.status !== undefined ? { status: query.status } : {}),
+        ...(query.createdFrom !== undefined ? { createdFrom: query.createdFrom } : {}),
+        ...(query.createdTo !== undefined ? { createdTo: query.createdTo } : {}),
+      };
+
+      return paginateAdminList({
+        query,
+        listOffset: ({ limit, offset }) => usersRepo.listOffset({ limit, offset, ...filters }),
+        listCursor: ({ limit, cursor }) =>
+          usersRepo.listCursor({ limit, ...(cursor !== undefined ? { cursor } : {}), ...filters }),
+        serialize: serializeUser,
+      });
+    },
+
+    async createUser(actor: AuthUser, input: CreateAdminUserBody): Promise<PublicUser> {
+      assertAdminUser(actor);
+
+      const resolvedName = input.name ?? input.displayName ?? input.email;
+      const resolvedActive = resolveActiveStateInput(input) ?? true;
+      const passwordHash = await hashPassword(input.password);
+
+      const created = await usersRepo.createUser({
+        id: generateId(),
+        email: input.email,
+        passwordHash,
+        displayName: resolvedName,
+        phone: input.phone ?? null,
+        address: input.address ?? null,
+        role: input.role,
+        isActive: resolvedActive,
+        deletedAt: resolvedActive ? null : new Date(),
       });
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
+      return serializeUser(created);
+    },
 
-      return {
-        data: pageItems.map(serializeUser),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
+    async updateUserStatus(
+      actor: AuthUser,
+      targetUserId: string,
+      input: UpdateUserStatusBody,
+    ): Promise<PublicUser> {
+      assertAdminUser(actor);
+      const nextActive = resolveActiveStateInput(input);
+
+      if (nextActive === false && actor.id === targetUserId) {
+        throw new ConflictError('You cannot deactivate your own account', 'CANNOT_DEACTIVATE_SELF');
+      }
+      if (input.role === 'user' && actor.id === targetUserId) {
+        throw new ConflictError('You cannot demote your own admin role', 'CANNOT_DEMOTE_SELF');
+      }
+
+      const existing = await usersRepo.findById(targetUserId);
+      if (existing === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
+
+      const nextName = input.name ?? input.displayName;
+      const now = new Date();
+      const updated = await usersRepo.adminUpdateById(
+        targetUserId,
+        {
+          ...(nextName !== undefined ? { displayName: nextName } : {}),
+          ...(input.email !== undefined ? { email: input.email } : {}),
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+          ...(input.address !== undefined ? { address: input.address } : {}),
+          ...(input.role !== undefined ? { role: input.role } : {}),
+          ...(nextActive !== undefined
+            ? {
+                isActive: nextActive,
+                deletedAt: nextActive ? null : (existing.deletedAt ?? now),
+              }
+            : {}),
         },
-      };
+        now,
+      );
+      if (updated === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
+
+      return serializeUser(updated);
+    },
+
+    async deleteUser(actor: AuthUser, targetUserId: string): Promise<void> {
+      assertAdminUser(actor);
+
+      if (actor.id === targetUserId) {
+        throw new ConflictError('You cannot deactivate your own account', 'CANNOT_DEACTIVATE_SELF');
+      }
+
+      const existing = await usersRepo.findById(targetUserId);
+      if (existing === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
+
+      const now = new Date();
+      await usersRepo.adminUpdateById(
+        targetUserId,
+        {
+          isActive: false,
+          deletedAt: existing.deletedAt ?? now,
+        },
+        now,
+      );
     },
   };
 }

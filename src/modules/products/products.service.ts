@@ -1,18 +1,23 @@
 import { z } from 'zod';
 import type { CategoryRow } from '@/db/schema/categories.ts';
-import type { ProductMediaItemRow, ProductRow, ProductSpecsMap } from '@/db/schema/products.ts';
+import type {
+  ProductCustomSpecRow,
+  ProductMediaItemRow,
+  ProductRow,
+  ProductSpecsMap,
+} from '@/db/schema/products.ts';
 import { NotFoundError, ValidationError, type ValidationIssueDetail } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import {
-  assertCursorOrPage,
-  buildOffsetPage,
+  buildCursorPage,
   type CursorPage,
-  type CursorPaginationQuery,
   decodeCursor,
   encodeCursor,
+  paginateAdminList,
 } from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { slugify } from '@/lib/slug.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { RelatedProductCard } from '@/modules/articles/articles.schema.ts';
 import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
@@ -20,6 +25,7 @@ import type { SpecFieldDef } from '@/modules/catalog/catalog.schema.ts';
 import { mergeEffectiveSpecSchema } from '@/modules/catalog/catalog.service.ts';
 import type {
   ProductCardRow,
+  ProductSortCursor,
   ProductSparepartCardRow,
   ProductsRepository,
 } from '@/modules/products/products.repository.ts';
@@ -28,10 +34,13 @@ import type {
   CreateProductBody,
   GetProductDetailQuery,
   ListAdminProductsQuery,
+  ListProductSparepartsQuery,
   ListProductsQuery,
   ProductCard,
+  ProductCustomSpecItem,
   ProductDetail,
   ProductMediaItemInput,
+  ProductSort,
   ProductSparepartLinkItem,
   ProductType,
   RecommendationsQuery,
@@ -51,6 +60,61 @@ const SlugValidator = z
   .max(280)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
+const ProductSortCursorPayloadSchema = z.discriminatedUnion('sort', [
+  z.object({
+    sort: z.literal('price_asc'),
+    priceIdr: z.number().int().nonnegative(),
+    id: z.uuid(),
+  }),
+  z.object({
+    sort: z.literal('price_desc'),
+    priceIdr: z.number().int().nonnegative(),
+    id: z.uuid(),
+  }),
+  z.object({
+    sort: z.literal('rating_desc'),
+    ratingAvg: z.string().regex(/^\d+(?:\.\d{1,2})?$/),
+    reviewCount: z.number().int().nonnegative(),
+    id: z.uuid(),
+  }),
+]);
+
+function encodeProductSortCursor(sort: ProductSort, row: ProductCardRow): string {
+  if (sort === 'newest') {
+    return encodeCursor(row);
+  }
+  const payload =
+    sort === 'rating_desc'
+      ? { sort, ratingAvg: row.ratingAvg, reviewCount: row.reviewCount, id: row.id }
+      : { sort, priceIdr: row.priceIdr, id: row.id };
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeProductSortCursor(rawCursor: string, sort: ProductSort): ProductSortCursor {
+  if (sort === 'newest') {
+    const decoded = decodeCursor(rawCursor);
+    return { sort: 'newest', createdAt: decoded.createdAt, id: decoded.id };
+  }
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8'));
+  } catch {
+    throw new ValidationError('Invalid pagination cursor', [
+      { field: 'cursor', message: 'Malformed pagination cursor' },
+    ]);
+  }
+
+  const validated = ProductSortCursorPayloadSchema.safeParse(parsedJson);
+  if (!validated.success || validated.data.sort !== sort) {
+    throw new ValidationError('Invalid pagination cursor for requested sort order', [
+      { field: 'cursor', message: `Cursor does not match sort="${sort}"` },
+    ]);
+  }
+
+  return validated.data;
+}
+
 export interface ProductsService {
   listPublicProducts(query: ListProductsQuery): Promise<CursorPage<ProductCard>>;
   getPublicProductBySlug(slug: string, query: GetProductDetailQuery): Promise<ProductDetail>;
@@ -61,7 +125,7 @@ export interface ProductsService {
   listRecommendations(query: RecommendationsQuery): Promise<readonly ProductCard[]>;
   listProductSpareparts(
     productId: string,
-    query: CursorPaginationQuery,
+    query: ListProductSparepartsQuery,
   ): Promise<CursorPage<ProductSparepartLinkItem>>;
   resolveRelatedProductCards(productIds: readonly string[]): Promise<readonly RelatedProductCard[]>;
   listAdminProducts(
@@ -107,7 +171,9 @@ export function serializeProductCard(row: ProductCardRow): ProductCard {
     requiresQuote: row.requiresQuote,
     stock: row.stock,
     isFeatured: row.isFeatured,
-    isActive: row.isActive,
+    isActive: isRecordActive(row),
+    status: toRecordStatus(row),
+    deletedAt: row.deletedAt !== null ? row.deletedAt.toISOString() : null,
     primaryImageUrl: row.primaryImageUrl,
     ratingAvg: Number(row.ratingAvg),
     reviewCount: row.reviewCount,
@@ -139,6 +205,14 @@ function normalizeMediaItems(items: readonly ProductMediaItemInput[]): {
     media: normalized,
     primaryImageUrl: firstImage?.url ?? null,
   };
+}
+
+function normalizeCustomSpecs(items: readonly ProductCustomSpecItem[]): ProductCustomSpecRow[] {
+  return items.map((item) => ({
+    label: item.label,
+    value: item.value,
+    ...(item.unit !== undefined && item.unit.length > 0 ? { unit: item.unit } : {}),
+  }));
 }
 
 function validateSpecsAgainstSchema(
@@ -235,6 +309,11 @@ export function createProductsService(
         ...(m.altText !== undefined ? { altText: m.altText } : {}),
       })),
       specs: { ...row.specs },
+      customSpecs: row.customSpecs.map((item) => ({
+        label: item.label,
+        value: item.value,
+        ...(item.unit !== undefined ? { unit: item.unit } : {}),
+      })),
       effectiveSpecSchema: [...effectiveSpecSchema],
       dimensions: {
         lengthCm: parseNumericNullable(row.lengthCm),
@@ -271,35 +350,42 @@ export function createProductsService(
         } else {
           categoryIds = [matchedCat.id];
         }
+      } else if (query.categoryId !== undefined) {
+        const matchedCat = await catalogRepo.findById(query.categoryId);
+        if (matchedCat === null || !isRecordActive(matchedCat)) {
+          return { data: [], meta: { nextCursor: null, hasMore: false, limit: query.limit } };
+        }
+        if (matchedCat.parentId === null) {
+          const children = await catalogRepo.listActiveChildren(matchedCat.id);
+          categoryIds = [matchedCat.id, ...children.map((c) => c.id)];
+        } else {
+          categoryIds = [matchedCat.id];
+        }
       }
 
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
+      const sort = query.sort;
+      const decodedCursor =
+        query.cursor !== undefined ? decodeProductSortCursor(query.cursor, sort) : undefined;
       const rows = await productsRepo.listPublicCursor({
         limit: query.limit + 1,
+        sort,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
         ...(categoryIds !== undefined ? { categoryIds } : {}),
-        ...(query.brandSlug !== undefined ? { brandSlug: query.brandSlug } : {}),
+        ...(query.brandSlug !== undefined ? { brandSlugs: query.brandSlug } : {}),
         ...(query.isFeatured !== undefined ? { isFeatured: query.isFeatured } : {}),
         ...(query.type !== undefined ? { productType: query.type } : {}),
         ...(query.requiresQuote !== undefined ? { requiresQuote: query.requiresQuote } : {}),
+        ...(query.inStock !== undefined ? { inStock: query.inStock } : {}),
+        ...(query.minRating !== undefined ? { minRating: query.minRating } : {}),
         ...(query.minPrice !== undefined ? { minPrice: query.minPrice } : {}),
         ...(query.maxPrice !== undefined ? { maxPrice: query.maxPrice } : {}),
+        ...(query.specs !== undefined ? { specFilters: query.specs } : {}),
         ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
-
-      return {
-        data: pageItems.map(serializeProductCard),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
-      };
+      return buildCursorPage(rows, query.limit, serializeProductCard, (lastItem) =>
+        encodeProductSortCursor(sort, lastItem),
+      );
     },
 
     async getPublicProductBySlug(
@@ -446,10 +532,10 @@ export function createProductsService(
 
     async listProductSpareparts(
       productId: string,
-      query: CursorPaginationQuery,
+      query: ListProductSparepartsQuery,
     ): Promise<CursorPage<ProductSparepartLinkItem>> {
       const existing = await productsRepo.findById(productId);
-      if (existing === null || !existing.isActive) {
+      if (existing === null || !isRecordActive(existing)) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
@@ -458,21 +544,10 @@ export function createProductsService(
         parentProductId: productId,
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.q !== undefined ? { query: query.q } : {}),
       });
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
-
-      return {
-        data: pageItems.map(serializeSparepartItem),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
-      };
+      return buildCursorPage(rows, query.limit, serializeSparepartItem);
     },
 
     async resolveRelatedProductCards(
@@ -495,38 +570,32 @@ export function createProductsService(
       query: ListAdminProductsQuery,
     ): Promise<CursorPage<ProductCard>> {
       assertAdminUser(actor);
-      assertCursorOrPage(query);
 
-      if (query.page !== undefined) {
-        const offset = (query.page - 1) * query.limit;
-        const { items, total } = await productsRepo.listAdminOffset({
-          limit: query.limit,
-          offset,
-          ...(query.q !== undefined ? { query: query.q } : {}),
-        });
-        return buildOffsetPage(items.map(serializeProductCard), total, query.page, query.limit);
-      }
-
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
-      const rows = await productsRepo.listAdminCursor({
-        limit: query.limit + 1,
-        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+      const filters = {
         ...(query.q !== undefined ? { query: query.q } : {}),
-      });
-
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
-
-      return {
-        data: pageItems.map(serializeProductCard),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
+        ...(query.status !== undefined ? { status: query.status } : {}),
+        ...(query.categoryId !== undefined ? { categoryId: query.categoryId } : {}),
+        ...(query.brandSlug !== undefined ? { brandSlugs: query.brandSlug } : {}),
+        ...(query.type !== undefined ? { productType: query.type } : {}),
+        ...(query.isFeatured !== undefined ? { isFeatured: query.isFeatured } : {}),
+        ...(query.requiresQuote !== undefined ? { requiresQuote: query.requiresQuote } : {}),
+        ...(query.inStock !== undefined ? { inStock: query.inStock } : {}),
+        ...(query.createdFrom !== undefined ? { createdFrom: query.createdFrom } : {}),
+        ...(query.createdTo !== undefined ? { createdTo: query.createdTo } : {}),
       };
+
+      return paginateAdminList({
+        query,
+        listOffset: ({ limit, offset }) =>
+          productsRepo.listAdminOffset({ limit, offset, ...filters }),
+        listCursor: ({ limit, cursor }) =>
+          productsRepo.listAdminCursor({
+            limit,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...filters,
+          }),
+        serialize: serializeProductCard,
+      });
     },
 
     async getAdminProductById(actor: AuthUser, id: string): Promise<ProductDetail> {
@@ -549,8 +618,12 @@ export function createProductsService(
       assertAdminUser(actor);
 
       const schemaInfo = await resolveCategoryWithSchema(input.categoryId);
+      if (!isRecordActive(schemaInfo.category)) {
+        throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+      }
       validateSpecsAgainstSchema(input.specs, schemaInfo.effectiveSpecSchema);
 
+      const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.name, 260);
       const { media, primaryImageUrl } = normalizeMediaItems(input.media);
 
@@ -573,10 +646,12 @@ export function createProductsService(
         requiresQuote: input.requiresQuote,
         stock: input.stock,
         isFeatured: input.isFeatured,
-        isActive: input.isActive,
+        isActive: resolvedActive,
+        deletedAt: resolvedActive ? null : new Date(),
         primaryImageUrl,
         media,
         specs: input.specs,
+        customSpecs: normalizeCustomSpecs(input.customSpecs),
         lengthCm: formatNumericInput(input.lengthCm),
         widthCm: formatNumericInput(input.widthCm),
         heightCm: formatNumericInput(input.heightCm),
@@ -601,8 +676,24 @@ export function createProductsService(
 
       const nextCategoryId = input.categoryId ?? existing.categoryId;
       const schemaInfo = await resolveCategoryWithSchema(nextCategoryId);
+      if (
+        input.categoryId !== undefined &&
+        input.categoryId !== existing.categoryId &&
+        !isRecordActive(schemaInfo.category)
+      ) {
+        throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+      }
       const nextSpecs = input.specs ?? existing.specs;
       validateSpecsAgainstSchema(nextSpecs, schemaInfo.effectiveSpecSchema);
+
+      const nextActive = resolveActiveStateInput(input);
+      const activePatch =
+        nextActive !== undefined
+          ? {
+              isActive: nextActive,
+              deletedAt: nextActive ? null : (existing.deletedAt ?? new Date()),
+            }
+          : {};
 
       const normalizedMedia =
         input.media !== undefined ? normalizeMediaItems(input.media) : undefined;
@@ -625,7 +716,7 @@ export function createProductsService(
         ...(input.requiresQuote !== undefined ? { requiresQuote: input.requiresQuote } : {}),
         ...(input.stock !== undefined ? { stock: input.stock } : {}),
         ...(input.isFeatured !== undefined ? { isFeatured: input.isFeatured } : {}),
-        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...activePatch,
         ...(normalizedMedia !== undefined
           ? {
               media: normalizedMedia.media,
@@ -633,6 +724,9 @@ export function createProductsService(
             }
           : {}),
         ...(input.specs !== undefined ? { specs: input.specs } : {}),
+        ...(input.customSpecs !== undefined
+          ? { customSpecs: normalizeCustomSpecs(input.customSpecs) }
+          : {}),
         ...(input.lengthCm !== undefined ? { lengthCm: formatNumericInput(input.lengthCm) } : {}),
         ...(input.widthCm !== undefined ? { widthCm: formatNumericInput(input.widthCm) } : {}),
         ...(input.heightCm !== undefined ? { heightCm: formatNumericInput(input.heightCm) } : {}),
@@ -661,7 +755,7 @@ export function createProductsService(
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
-      await productsRepo.softDeleteById(id, new Date());
+      await productsRepo.softDeleteById(id, existing.deletedAt ?? new Date());
       revalidator.notify(['products', `product:${existing.slug}`, 'sitemap']);
     },
 

@@ -19,7 +19,8 @@
     "db:refresh": "bun run src/db/refresh.ts",
     "db:studio": "bun --bun drizzle-kit studio",
     "docs:openapi": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts",
-    "docs:check": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts --check"
+    "docs:check": "bun --preload ./src/test/setup.ts scripts/export-openapi.ts --check",
+    "docs:postman": "bun run scripts/export-postman-json.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",

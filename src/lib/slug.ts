@@ -1,6 +1,18 @@
+import { z } from '@hono/zod-openapi';
 import { ValidationError } from '@/lib/errors.ts';
 
 const MAX_DEFAULT_SLUG_LENGTH = 200;
+const KEBAB_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Shared Zod validator for lowercase kebab-case URL/brand slugs.
+ */
+export function createSlugSchema(
+  maxLength: number,
+  message: string = 'Slug must be lowercase kebab-case',
+) {
+  return z.string().trim().min(1).max(maxLength).regex(KEBAB_SLUG_RE, message);
+}
 
 /**
  * Normalizes arbitrary titles/names into clean URL-safe ASCII slugs.

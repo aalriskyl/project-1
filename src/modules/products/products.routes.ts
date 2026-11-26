@@ -1,7 +1,6 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
 import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { CursorPaginationQuerySchema } from '@/lib/pagination.ts';
 import { ok, okPage } from '@/lib/response.ts';
 import { requireAuth } from '@/middlewares/auth.ts';
 import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
@@ -12,6 +11,7 @@ import {
   CreateProductBodySchema,
   GetProductDetailQuerySchema,
   ListAdminProductsQuerySchema,
+  ListProductSparepartsQuerySchema,
   ListProductsQuerySchema,
   ProductCardListEnvelopeSchema,
   ProductCursorPageSchema,
@@ -33,7 +33,7 @@ const listProductsRoute = createRoute({
   tags: ['Products'],
   summary: 'List Products',
   description:
-    'List and search active products with cursor pagination, category/brand/price filters, and `?q=` fuzzy search.',
+    'List and search active products with cursor pagination, sorting (`?sort=newest|price_asc|price_desc|rating_desc`), category (`categorySlug` or `categoryId`), multi-brand (`brandSlug=perkins,cummins`), price/stock/rating filters, dynamic JSONB `specs` filters (`?specs=rated_power_kva:gte:30,silent_canopy:eq:true`), and `?q=` fuzzy search.',
   request: {
     query: ListProductsQuerySchema,
   },
@@ -102,10 +102,11 @@ const listSparepartsRoute = createRoute({
   path: '/{id}/spareparts',
   tags: ['Products'],
   summary: 'List Product Spare Parts',
-  description: 'List compatible spare parts for an equipment product with cursor pagination.',
+  description:
+    'List compatible spare parts for an equipment product with cursor pagination and optional `?q=` fuzzy search.',
   request: {
     params: ProductIdParamSchema,
-    query: CursorPaginationQuerySchema,
+    query: ListProductSparepartsQuerySchema,
   },
   responses: {
     200: {
@@ -156,7 +157,7 @@ const listAdminProductsRoute = createRoute({
   tags: ['Admin - Products'],
   summary: 'Admin: List Products',
   description:
-    'List all non-deleted products (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.',
+    'List products (active and inactive) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, and `?q=` fuzzy search.',
   security: [{ BearerAuth: [] }],
   request: {
     query: ListAdminProductsQuerySchema,

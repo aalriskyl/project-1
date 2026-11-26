@@ -9,6 +9,7 @@ import type { ProductRow } from '@/db/schema/products.ts';
 import { extractReferencedObjectPaths } from '@/lib/asset-url.ts';
 import { ConflictError } from '@/lib/errors.ts';
 import { matchesFuzzyInMemory } from '@/lib/search.ts';
+import { isRecordActive, type RecordStatus } from '@/lib/status.ts';
 import type {
   ArticlesRepository,
   ArticleSummaryRow,
@@ -26,6 +27,7 @@ import type {
   ProductSparepartCardRow,
   ProductsRepository,
 } from '@/modules/products/products.repository.ts';
+import type { ProductSpecFilter } from '@/modules/products/products.schema.ts';
 import type {
   ProductReviewWithAuthorRow,
   ReviewsRepository,
@@ -38,6 +40,59 @@ import type {
 import type { UserRole } from '@/types/app.ts';
 
 type StoredUser = UserWithCredentials;
+
+function matchesDateRange(createdAt: Date, createdFrom?: Date, createdTo?: Date): boolean {
+  const ts = createdAt.getTime();
+  if (createdFrom !== undefined && ts < createdFrom.getTime()) return false;
+  if (createdTo !== undefined && ts > createdTo.getTime()) return false;
+  return true;
+}
+
+function compareCreatedAtDesc(
+  a: { readonly createdAt: Date; readonly id: string },
+  b: { readonly createdAt: Date; readonly id: string },
+): number {
+  const diff = b.createdAt.getTime() - a.createdAt.getTime();
+  return diff !== 0 ? diff : b.id.localeCompare(a.id);
+}
+
+function applyDescCursor<T extends { readonly id: string }>(
+  rows: readonly T[],
+  cursor: { readonly createdAt: Date; readonly id: string } | undefined,
+  getTimestamp: (row: T) => Date,
+): readonly T[] {
+  if (cursor === undefined) {
+    return rows;
+  }
+  const cMs = cursor.createdAt.getTime();
+  return rows.filter((r) => {
+    const rMs = getTimestamp(r).getTime();
+    return rMs < cMs || (rMs === cMs && r.id < cursor.id);
+  });
+}
+
+function matchesSpecFilter(
+  specs: Record<string, string | number | boolean>,
+  specFilter: ProductSpecFilter,
+): boolean {
+  const raw = specs[specFilter.key];
+  if (raw === undefined) return false;
+  if (specFilter.op === 'gt') return typeof raw === 'number' && raw > specFilter.value;
+  if (specFilter.op === 'gte') return typeof raw === 'number' && raw >= specFilter.value;
+  if (specFilter.op === 'lt') return typeof raw === 'number' && raw < specFilter.value;
+  if (specFilter.op === 'lte') return typeof raw === 'number' && raw <= specFilter.value;
+  if (specFilter.op === 'contains') {
+    return typeof raw === 'string' && raw.toLowerCase().includes(specFilter.value.toLowerCase());
+  }
+  if (typeof specFilter.value === 'boolean') return raw === specFilter.value;
+  if (typeof specFilter.value === 'number') {
+    return (
+      raw === specFilter.value ||
+      (typeof raw === 'string' && raw.toLowerCase() === String(specFilter.value).toLowerCase())
+    );
+  }
+  return typeof raw === 'string' && raw.toLowerCase() === specFilter.value.toLowerCase();
+}
 
 export interface InMemoryDatastore {
   readonly authRepo: AuthRepository;
@@ -53,6 +108,7 @@ export interface InMemoryDatastore {
     readonly passwordHash: string | null;
     readonly googleSub?: string | null;
     readonly phone?: string | null;
+    readonly address?: string | null;
     readonly displayName: string;
     readonly role?: UserRole;
     readonly createdAt?: Date;
@@ -68,15 +124,27 @@ export interface InMemoryDatastore {
   }): MediaUploadRow;
 }
 
+function matchesStatusFilter(
+  row: { readonly isActive: boolean; readonly deletedAt: Date | null },
+  status?: RecordStatus,
+): boolean {
+  if (status === undefined) return true;
+  const active = isRecordActive(row);
+  return status === 'active' ? active : !active;
+}
+
 function toPublicEntity(stored: StoredUser): UserEntity {
   return {
     id: stored.id,
     email: stored.email,
     phone: stored.phone,
+    address: stored.address,
     displayName: stored.displayName,
     role: stored.role,
+    isActive: stored.isActive,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
+    deletedAt: stored.deletedAt,
   };
 }
 
@@ -96,9 +164,11 @@ function toArticleSummary(row: ArticleRow): ArticleSummaryRow {
     ogImageUrl: row.ogImageUrl,
     tags: [...row.tags],
     isPublished: row.isPublished,
+    isActive: row.isActive,
     publishedAt: row.publishedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
   };
 }
 
@@ -116,6 +186,7 @@ function toProductCardRow(row: ProductRow): ProductCardRow {
     stock: row.stock,
     isFeatured: row.isFeatured,
     isActive: row.isActive,
+    deletedAt: row.deletedAt,
     primaryImageUrl: row.primaryImageUrl,
     ratingAvg: row.ratingAvg,
     reviewCount: row.reviewCount,
@@ -184,7 +255,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     const prod = productsById.get(productId);
     if (prod === undefined) return;
     const pubReviews = [...reviewsById.values()].filter(
-      (r) => r.productId === productId && r.isPublished,
+      (r) => r.productId === productId && r.isPublished && isRecordActive(r),
     );
     const count = pubReviews.length;
     const avg =
@@ -198,6 +269,11 @@ export function createInMemoryDatastore(): InMemoryDatastore {
   };
 
   const authRepo: AuthRepository = {
+    findUserByIdWithCredentials(id: string): Promise<UserWithCredentials | null> {
+      const found = usersById.get(id);
+      return Promise.resolve(found !== undefined ? { ...found } : null);
+    },
+
     findUserByEmailWithCredentials(email: string): Promise<UserWithCredentials | null> {
       const found = findStoredByEmail(email);
       return Promise.resolve(found !== null ? { ...found } : null);
@@ -226,10 +302,13 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         passwordHash: user.passwordHash,
         googleSub: user.googleSub ?? null,
         phone: user.phone ?? null,
+        address: user.address ?? null,
         displayName: user.displayName,
         role: user.role,
+        isActive: true,
         createdAt: now,
         updatedAt: now,
+        deletedAt: null,
       };
       usersById.set(stored.id, stored);
       insertToken(refreshToken);
@@ -346,7 +425,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       }
 
       const user = usersById.get(target.userId);
-      if (user === undefined) {
+      if (user === undefined || !isRecordActive(user)) {
         return Promise.resolve(false);
       }
 
@@ -359,6 +438,20 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       }
       for (const [id, tok] of tokensById.entries()) {
         if (tok.userId === user.id && tok.revokedAt === null) {
+          tokensById.set(id, { ...tok, revokedAt: now });
+        }
+      }
+      return Promise.resolve(true);
+    },
+
+    updatePasswordAndRevokeSessions({ userId, passwordHash, now }): Promise<boolean> {
+      const user = usersById.get(userId);
+      if (user === undefined || !isRecordActive(user)) {
+        return Promise.resolve(false);
+      }
+      usersById.set(userId, { ...user, passwordHash, updatedAt: now });
+      for (const [id, tok] of tokensById.entries()) {
+        if (tok.userId === userId && tok.revokedAt === null) {
           tokensById.set(id, { ...tok, revokedAt: now });
         }
       }
@@ -377,69 +470,131 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(found !== null ? { ...found } : null);
     },
 
+    createUser(input): Promise<UserEntity> {
+      if (findStoredByEmail(input.email) !== null) {
+        return Promise.reject(
+          new ConflictError('An account with this email already exists', 'EMAIL_ALREADY_EXISTS'),
+        );
+      }
+      const now = new Date();
+      const stored: StoredUser = {
+        id: input.id,
+        email: input.email.trim().toLowerCase(),
+        passwordHash: input.passwordHash,
+        googleSub: null,
+        phone: input.phone,
+        address: input.address,
+        displayName: input.displayName,
+        role: input.role,
+        isActive: input.isActive,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: input.deletedAt,
+      };
+      usersById.set(stored.id, stored);
+      return Promise.resolve(toPublicEntity(stored));
+    },
+
     updateProfile(id, patch): Promise<UserEntity | null> {
       const existing = usersById.get(id);
-      if (existing === undefined) {
+      if (existing === undefined || !isRecordActive(existing)) {
         return Promise.resolve(null);
       }
       const updated: StoredUser = {
         ...existing,
         ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
         ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+        ...(patch.address !== undefined ? { address: patch.address } : {}),
         updatedAt: new Date(),
       };
       usersById.set(id, updated);
       return Promise.resolve(toPublicEntity(updated));
     },
 
-    listCursor({ limit, cursor, query, role }): Promise<readonly UserEntity[]> {
+    adminUpdateById(id, patch, now): Promise<UserEntity | null> {
+      const existing = usersById.get(id);
+      if (existing === undefined) {
+        return Promise.resolve(null);
+      }
+      const nextEmail = patch.email !== undefined ? patch.email.trim().toLowerCase() : undefined;
+      if (nextEmail !== undefined) {
+        for (const other of usersById.values()) {
+          if (other.id !== id && other.email === nextEmail) {
+            return Promise.reject(
+              new ConflictError(
+                'An account with this email already exists',
+                'EMAIL_ALREADY_EXISTS',
+              ),
+            );
+          }
+        }
+      }
+      const updated: StoredUser = {
+        ...existing,
+        ...(patch.displayName !== undefined ? { displayName: patch.displayName } : {}),
+        ...(nextEmail !== undefined ? { email: nextEmail } : {}),
+        ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+        ...(patch.address !== undefined ? { address: patch.address } : {}),
+        ...(patch.role !== undefined ? { role: patch.role } : {}),
+        ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt } : {}),
+        updatedAt: now,
+      };
+      usersById.set(id, updated);
+      if (patch.isActive === false || patch.role !== undefined) {
+        for (const [tokenId, tok] of tokensById.entries()) {
+          if (tok.userId === id && tok.revokedAt === null) {
+            tokensById.set(tokenId, { ...tok, revokedAt: now });
+          }
+        }
+      }
+      return Promise.resolve(toPublicEntity(updated));
+    },
+
+    listCursor({
+      limit,
+      cursor,
+      query,
+      role,
+      status,
+      createdFrom,
+      createdTo,
+    }): Promise<readonly UserEntity[]> {
       const sorted = [...usersById.values()]
         .filter((item) => {
           if (role !== undefined && item.role !== role) return false;
+          if (!matchesStatusFilter(item, status)) return false;
+          if (!matchesDateRange(item.createdAt, createdFrom, createdTo)) return false;
           if (
             query !== undefined &&
-            !matchesFuzzyInMemory([item.displayName, item.email, item.phone], query)
+            !matchesFuzzyInMemory([item.displayName, item.email, item.phone, item.address], query)
           ) {
             return false;
           }
           return true;
         })
-        .sort((a, b) => {
-          const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
-          if (timeDiff !== 0) {
-            return timeDiff;
-          }
-          return b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
-      const filtered =
-        cursor !== undefined
-          ? sorted.filter((item) => {
-              const itemMs = item.createdAt.getTime();
-              const cursorMs = cursor.createdAt.getTime();
-              return itemMs < cursorMs || (itemMs === cursorMs && item.id < cursor.id);
-            })
-          : sorted;
+      const filtered = applyDescCursor(sorted, cursor, (item) => item.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit).map(toPublicEntity));
     },
 
-    listOffset({ limit, offset, query, role }) {
+    listOffset({ limit, offset, query, role, status, createdFrom, createdTo }) {
       const sorted = [...usersById.values()]
         .filter((item) => {
           if (role !== undefined && item.role !== role) return false;
+          if (!matchesStatusFilter(item, status)) return false;
+          if (!matchesDateRange(item.createdAt, createdFrom, createdTo)) return false;
           if (
             query !== undefined &&
-            !matchesFuzzyInMemory([item.displayName, item.email, item.phone], query)
+            !matchesFuzzyInMemory([item.displayName, item.email, item.phone, item.address], query)
           ) {
             return false;
           }
           return true;
         })
-        .sort((a, b) => {
-          const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
-          return timeDiff !== 0 ? timeDiff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
       return Promise.resolve({
         items: sorted.slice(offset, offset + limit).map(toPublicEntity),
@@ -457,7 +612,12 @@ export function createInMemoryDatastore(): InMemoryDatastore {
   const catalogRepo: CatalogRepository = {
     listActive(filter): Promise<readonly CategoryRow[]> {
       const active = [...categoriesById.values()].filter((row) => {
-        if (row.deletedAt !== null || !row.isActive) return false;
+        if (!isRecordActive(row)) return false;
+        if (filter?.parentId !== undefined && row.parentId !== filter.parentId) return false;
+        if (filter?.parentId === undefined) {
+          if (filter?.rootOnly === true && row.parentId !== null) return false;
+          if (filter?.rootOnly === false && row.parentId === null) return false;
+        }
         if (
           filter?.query !== undefined &&
           !matchesFuzzyInMemory([row.name, row.slug, row.description], filter.query)
@@ -469,10 +629,22 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(sortCategories(active));
     },
 
-    listAdminCursor({ limit, cursor, query }): Promise<readonly CategoryRow[]> {
+    listAdminCursor({
+      limit,
+      cursor,
+      query,
+      status,
+      parentId,
+      rootOnly,
+    }): Promise<readonly CategoryRow[]> {
       const sorted = [...categoriesById.values()]
         .filter((row) => {
-          if (row.deletedAt !== null) return false;
+          if (!matchesStatusFilter(row, status)) return false;
+          if (parentId !== undefined && row.parentId !== parentId) return false;
+          if (parentId === undefined) {
+            if (rootOnly === true && row.parentId !== null) return false;
+            if (rootOnly === false && row.parentId === null) return false;
+          }
           if (
             query !== undefined &&
             !matchesFuzzyInMemory([row.name, row.slug, row.description], query)
@@ -481,27 +653,22 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
-      const filtered =
-        cursor !== undefined
-          ? sorted.filter((r) => {
-              const rMs = r.createdAt.getTime();
-              const cMs = cursor.createdAt.getTime();
-              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
-            })
-          : sorted;
+      const filtered = applyDescCursor(sorted, cursor, (r) => r.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit));
     },
 
-    listAdminOffset({ limit, offset, query }) {
+    listAdminOffset({ limit, offset, query, status, parentId, rootOnly }) {
       const sorted = [...categoriesById.values()]
         .filter((row) => {
-          if (row.deletedAt !== null) return false;
+          if (!matchesStatusFilter(row, status)) return false;
+          if (parentId !== undefined && row.parentId !== parentId) return false;
+          if (parentId === undefined) {
+            if (rootOnly === true && row.parentId !== null) return false;
+            if (rootOnly === false && row.parentId === null) return false;
+          }
           if (
             query !== undefined &&
             !matchesFuzzyInMemory([row.name, row.slug, row.description], query)
@@ -510,10 +677,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
       return Promise.resolve({
         items: sorted.slice(offset, offset + limit),
@@ -523,12 +687,12 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     findById(id: string): Promise<CategoryRow | null> {
       const found = categoriesById.get(id);
-      return Promise.resolve(found !== undefined && found.deletedAt === null ? found : null);
+      return Promise.resolve(found ?? null);
     },
 
     findActiveBySlug(slug: string): Promise<CategoryRow | null> {
       for (const row of categoriesById.values()) {
-        if (row.slug === slug && row.isActive && row.deletedAt === null) {
+        if (row.slug === slug && isRecordActive(row)) {
           return Promise.resolve(row);
         }
       }
@@ -537,14 +701,14 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     listActiveChildren(parentId: string): Promise<readonly CategoryRow[]> {
       const children = [...categoriesById.values()].filter(
-        (row) => row.parentId === parentId && row.isActive && row.deletedAt === null,
+        (row) => row.parentId === parentId && isRecordActive(row),
       );
       return Promise.resolve(sortCategories(children));
     },
 
     hasNonDeletedChildren(parentId: string): Promise<boolean> {
       for (const row of categoriesById.values()) {
-        if (row.parentId === parentId && row.deletedAt === null) {
+        if (row.parentId === parentId && isRecordActive(row)) {
           return Promise.resolve(true);
         }
       }
@@ -553,7 +717,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     hasNonDeletedProducts(categoryId: string): Promise<boolean> {
       for (const row of productsById.values()) {
-        if (row.categoryId === categoryId && row.deletedAt === null) {
+        if (row.categoryId === categoryId && isRecordActive(row)) {
           return Promise.resolve(true);
         }
       }
@@ -588,7 +752,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         isActive: input.isActive,
         createdAt: now,
         updatedAt: now,
-        deletedAt: null,
+        deletedAt: input.deletedAt ?? null,
       };
       assertMediaAttachments(created);
       categoriesById.set(created.id, created);
@@ -597,12 +761,14 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     updateById(id, patch): Promise<CategoryRow | null> {
       const existing = categoriesById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(null);
       }
-      if (patch.slug !== undefined) {
+      const nextDeletedAt = patch.deletedAt !== undefined ? patch.deletedAt : existing.deletedAt;
+      const nextSlug = patch.slug ?? existing.slug;
+      if (nextDeletedAt === null) {
         for (const other of categoriesById.values()) {
-          if (other.id !== id && other.deletedAt === null && other.slug === patch.slug) {
+          if (other.id !== id && other.deletedAt === null && other.slug === nextSlug) {
             return Promise.reject(
               new ConflictError('A category with this slug already exists', 'SLUG_ALREADY_EXISTS'),
             );
@@ -626,6 +792,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.specSchema !== undefined ? { specSchema: [...patch.specSchema] } : {}),
         ...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
         ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt } : {}),
         updatedAt: new Date(),
       };
       assertMediaAttachments(updated);
@@ -635,41 +802,44 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     softDeleteById(id, deletedAt): Promise<boolean> {
       const existing = categoriesById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(false);
       }
-      categoriesById.set(id, { ...existing, deletedAt, updatedAt: deletedAt });
+      categoriesById.set(id, { ...existing, isActive: false, deletedAt, updatedAt: deletedAt });
       return Promise.resolve(true);
     },
 
     listSitemapIndex() {
       const cats = [...categoriesById.values()]
-        .filter((r) => r.deletedAt === null && r.isActive && !r.noIndex)
+        .filter((r) => isRecordActive(r) && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       const prods = [...productsById.values()]
-        .filter((r) => r.deletedAt === null && r.isActive && !r.noIndex)
+        .filter((r) => isRecordActive(r) && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       const arts = [...articlesById.values()]
-        .filter((r) => r.deletedAt === null && r.isPublished && !r.noIndex)
+        .filter((r) => isRecordActive(r) && r.isPublished && !r.noIndex)
         .map((r) => ({ slug: r.slug, updatedAt: r.updatedAt }));
       return Promise.resolve({ categories: cats, products: prods, articles: arts });
     },
   };
 
-  const sortProductsDesc = (rows: ProductRow[]): ProductRow[] =>
-    rows.sort((a, b) => {
-      const diff = b.createdAt.getTime() - a.createdAt.getTime();
-      return diff !== 0 ? diff : b.id.localeCompare(a.id);
-    });
+  const sortProductsDesc = (rows: ProductRow[]): ProductRow[] => rows.sort(compareCreatedAtDesc);
 
   const productsRepo: ProductsRepository = {
     listPublicCursor(filter): Promise<readonly ProductCardRow[]> {
+      const sort = filter.sort ?? 'newest';
       const matching = [...productsById.values()].filter((row) => {
         if (row.deletedAt !== null || !row.isActive) return false;
         if (filter.categoryIds !== undefined && !filter.categoryIds.includes(row.categoryId)) {
           return false;
         }
-        if (filter.brandSlug !== undefined && row.brandSlug !== filter.brandSlug) return false;
+        if (
+          filter.brandSlugs !== undefined &&
+          filter.brandSlugs.length > 0 &&
+          (row.brandSlug === null || !filter.brandSlugs.includes(row.brandSlug))
+        ) {
+          return false;
+        }
         if (filter.isFeatured !== undefined && row.isFeatured !== filter.isFeatured) return false;
         if (filter.productType !== undefined && row.productType !== filter.productType) {
           return false;
@@ -677,8 +847,19 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         if (filter.requiresQuote !== undefined && row.requiresQuote !== filter.requiresQuote) {
           return false;
         }
+        if (filter.inStock === true && row.stock <= 0) return false;
+        if (filter.inStock === false && row.stock !== 0) return false;
+        if (filter.minRating !== undefined && Number(row.ratingAvg) < filter.minRating) {
+          return false;
+        }
         if (filter.minPrice !== undefined && row.priceIdr < filter.minPrice) return false;
         if (filter.maxPrice !== undefined && row.priceIdr > filter.maxPrice) return false;
+        if (
+          filter.specFilters !== undefined &&
+          !filter.specFilters.every((sf) => matchesSpecFilter(row.specs, sf))
+        ) {
+          return false;
+        }
         if (
           filter.query !== undefined &&
           !matchesFuzzyInMemory([row.name, row.sku, row.brandSlug, row.descriptionMd], filter.query)
@@ -688,24 +869,85 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         return true;
       });
 
-      const sorted = sortProductsDesc(matching);
+      const sorted =
+        sort === 'price_asc'
+          ? matching.sort((a, b) => a.priceIdr - b.priceIdr || a.id.localeCompare(b.id))
+          : sort === 'price_desc'
+            ? matching.sort((a, b) => b.priceIdr - a.priceIdr || b.id.localeCompare(a.id))
+            : sort === 'rating_desc'
+              ? matching.sort(
+                  (a, b) =>
+                    Number(b.ratingAvg) - Number(a.ratingAvg) ||
+                    b.reviewCount - a.reviewCount ||
+                    b.id.localeCompare(a.id),
+                )
+              : sortProductsDesc(matching);
+
+      const cursor = filter.cursor;
       const afterCursor =
-        filter.cursor !== undefined
+        cursor !== undefined
           ? sorted.filter((r) => {
-              const rMs = r.createdAt.getTime();
-              const cMs = filter.cursor?.createdAt.getTime() ?? 0;
-              const cId = filter.cursor?.id ?? '';
-              return rMs < cMs || (rMs === cMs && r.id < cId);
+              if (cursor.sort === 'newest') {
+                const rMs = r.createdAt.getTime();
+                const cMs = cursor.createdAt.getTime();
+                return rMs < cMs || (rMs === cMs && r.id < cursor.id);
+              }
+              if (cursor.sort === 'price_asc') {
+                return (
+                  r.priceIdr > cursor.priceIdr ||
+                  (r.priceIdr === cursor.priceIdr && r.id > cursor.id)
+                );
+              }
+              if (cursor.sort === 'price_desc') {
+                return (
+                  r.priceIdr < cursor.priceIdr ||
+                  (r.priceIdr === cursor.priceIdr && r.id < cursor.id)
+                );
+              }
+              const rAvg = Number(r.ratingAvg);
+              const cAvg = Number(cursor.ratingAvg);
+              return (
+                rAvg < cAvg ||
+                (rAvg === cAvg && r.reviewCount < cursor.reviewCount) ||
+                (rAvg === cAvg && r.reviewCount === cursor.reviewCount && r.id < cursor.id)
+              );
             })
           : sorted;
 
       return Promise.resolve(afterCursor.slice(0, filter.limit).map(toProductCardRow));
     },
 
-    listAdminCursor({ limit, cursor, query }): Promise<readonly ProductCardRow[]> {
+    listAdminCursor({
+      limit,
+      cursor,
+      query,
+      status,
+      categoryId,
+      brandSlugs,
+      productType,
+      isFeatured,
+      requiresQuote,
+      inStock,
+      createdFrom,
+      createdTo,
+    }): Promise<readonly ProductCardRow[]> {
       const sorted = sortProductsDesc(
         [...productsById.values()].filter((r) => {
-          if (r.deletedAt !== null) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (categoryId !== undefined && r.categoryId !== categoryId) return false;
+          if (
+            brandSlugs !== undefined &&
+            brandSlugs.length > 0 &&
+            (r.brandSlug === null || !brandSlugs.includes(r.brandSlug))
+          ) {
+            return false;
+          }
+          if (productType !== undefined && r.productType !== productType) return false;
+          if (isFeatured !== undefined && r.isFeatured !== isFeatured) return false;
+          if (requiresQuote !== undefined && r.requiresQuote !== requiresQuote) return false;
+          if (inStock === true && r.stock <= 0) return false;
+          if (inStock === false && r.stock !== 0) return false;
           if (
             query !== undefined &&
             !matchesFuzzyInMemory([r.name, r.sku, r.brandSlug, r.descriptionMd], query)
@@ -726,10 +968,37 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(filtered.slice(0, limit).map(toProductCardRow));
     },
 
-    listAdminOffset({ limit, offset, query }) {
+    listAdminOffset({
+      limit,
+      offset,
+      query,
+      status,
+      categoryId,
+      brandSlugs,
+      productType,
+      isFeatured,
+      requiresQuote,
+      inStock,
+      createdFrom,
+      createdTo,
+    }) {
       const sorted = sortProductsDesc(
         [...productsById.values()].filter((r) => {
-          if (r.deletedAt !== null) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (categoryId !== undefined && r.categoryId !== categoryId) return false;
+          if (
+            brandSlugs !== undefined &&
+            brandSlugs.length > 0 &&
+            (r.brandSlug === null || !brandSlugs.includes(r.brandSlug))
+          ) {
+            return false;
+          }
+          if (productType !== undefined && r.productType !== productType) return false;
+          if (isFeatured !== undefined && r.isFeatured !== isFeatured) return false;
+          if (requiresQuote !== undefined && r.requiresQuote !== requiresQuote) return false;
+          if (inStock === true && r.stock <= 0) return false;
+          if (inStock === false && r.stock !== 0) return false;
           if (
             query !== undefined &&
             !matchesFuzzyInMemory([r.name, r.sku, r.brandSlug, r.descriptionMd], query)
@@ -747,7 +1016,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     findActiveBySlug(slug): Promise<ProductRow | null> {
       for (const row of productsById.values()) {
-        if (row.slug === slug && row.isActive && row.deletedAt === null) {
+        if (row.slug === slug && isRecordActive(row)) {
           return Promise.resolve(row);
         }
       }
@@ -756,20 +1025,20 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     findById(id): Promise<ProductRow | null> {
       const row = productsById.get(id);
-      return Promise.resolve(row !== undefined && row.deletedAt === null ? row : null);
+      return Promise.resolve(row ?? null);
     },
 
     findActiveByIds(ids): Promise<readonly ProductRow[]> {
       return Promise.resolve(
         ids.flatMap((id) => {
           const r = productsById.get(id);
-          return r !== undefined && r.isActive && r.deletedAt === null ? [r] : [];
+          return r !== undefined && isRecordActive(r) ? [r] : [];
         }),
       );
     },
 
     findActiveBySlugs(slugs): Promise<readonly ProductRow[]> {
-      const active = [...productsById.values()].filter((r) => r.isActive && r.deletedAt === null);
+      const active = [...productsById.values()].filter((r) => isRecordActive(r));
       return Promise.resolve(active.filter((r) => slugs.includes(r.slug)));
     },
 
@@ -777,7 +1046,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       return Promise.resolve(
         ids.flatMap((id) => {
           const r = productsById.get(id);
-          return r !== undefined && r.isActive && r.deletedAt === null ? [toProductCardRow(r)] : [];
+          return r !== undefined && isRecordActive(r) ? [toProductCardRow(r)] : [];
         }),
       );
     },
@@ -789,7 +1058,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     }): Promise<readonly ProductCardRow[]> {
       const rows = [...productsById.values()]
         .filter((r) => {
-          if (r.deletedAt !== null || !r.isActive) return false;
+          if (!isRecordActive(r)) return false;
           if (excludeProductId !== undefined && r.id === excludeProductId) return false;
           if (categoryId !== undefined && r.categoryId !== categoryId) return false;
           return true;
@@ -805,12 +1074,19 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       parentProductId,
       limit,
       cursor,
+      query,
     }): Promise<readonly ProductSparepartCardRow[]> {
       const links = sparepartsByParent.get(parentProductId) ?? [];
       const joined: ProductSparepartCardRow[] = [];
       for (const link of links) {
         const sp = productsById.get(link.sparepartProductId);
-        if (sp !== undefined && sp.deletedAt === null && sp.isActive) {
+        if (sp !== undefined && isRecordActive(sp)) {
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([sp.name, sp.sku, sp.brandSlug, sp.descriptionMd], query)
+          ) {
+            continue;
+          }
           joined.push({ ...toProductCardRow(sp), note: link.note });
         }
       }
@@ -872,6 +1148,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         primaryImageUrl: input.primaryImageUrl,
         media: [...input.media],
         specs: { ...input.specs },
+        customSpecs: input.customSpecs.map((item) => ({ ...item })),
         lengthCm: input.lengthCm,
         widthCm: input.widthCm,
         heightCm: input.heightCm,
@@ -881,7 +1158,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         searchVector: null,
         createdAt: now,
         updatedAt: now,
-        deletedAt: null,
+        deletedAt: input.deletedAt ?? null,
       };
       assertMediaAttachments(created);
       productsById.set(created.id, created);
@@ -890,20 +1167,25 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     updateById(id, patch): Promise<ProductRow | null> {
       const existing = productsById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(null);
       }
-      for (const other of productsById.values()) {
-        if (other.id === id || other.deletedAt !== null) continue;
-        if (patch.slug !== undefined && other.slug === patch.slug) {
-          return Promise.reject(
-            new ConflictError('A product with this slug already exists', 'SLUG_ALREADY_EXISTS'),
-          );
-        }
-        if (patch.sku !== undefined && patch.sku !== null && other.sku === patch.sku) {
-          return Promise.reject(
-            new ConflictError('A product with this SKU already exists', 'SKU_ALREADY_EXISTS'),
-          );
+      const nextDeletedAt = patch.deletedAt !== undefined ? patch.deletedAt : existing.deletedAt;
+      const nextSlug = patch.slug ?? existing.slug;
+      const nextSku = patch.sku !== undefined ? patch.sku : existing.sku;
+      if (nextDeletedAt === null) {
+        for (const other of productsById.values()) {
+          if (other.id === id || other.deletedAt !== null) continue;
+          if (other.slug === nextSlug) {
+            return Promise.reject(
+              new ConflictError('A product with this slug already exists', 'SLUG_ALREADY_EXISTS'),
+            );
+          }
+          if (nextSku !== null && other.sku === nextSku) {
+            return Promise.reject(
+              new ConflictError('A product with this SKU already exists', 'SKU_ALREADY_EXISTS'),
+            );
+          }
         }
       }
       const updated: ProductRow = {
@@ -926,9 +1208,13 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         ...(patch.stock !== undefined ? { stock: patch.stock } : {}),
         ...(patch.isFeatured !== undefined ? { isFeatured: patch.isFeatured } : {}),
         ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt } : {}),
         ...(patch.primaryImageUrl !== undefined ? { primaryImageUrl: patch.primaryImageUrl } : {}),
         ...(patch.media !== undefined ? { media: [...patch.media] } : {}),
         ...(patch.specs !== undefined ? { specs: { ...patch.specs } } : {}),
+        ...(patch.customSpecs !== undefined
+          ? { customSpecs: patch.customSpecs.map((item) => ({ ...item })) }
+          : {}),
         ...(patch.lengthCm !== undefined ? { lengthCm: patch.lengthCm } : {}),
         ...(patch.widthCm !== undefined ? { widthCm: patch.widthCm } : {}),
         ...(patch.heightCm !== undefined ? { heightCm: patch.heightCm } : {}),
@@ -942,10 +1228,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     softDeleteById(id, deletedAt): Promise<boolean> {
       const existing = productsById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(false);
       }
-      productsById.set(id, { ...existing, deletedAt, updatedAt: deletedAt });
+      productsById.set(id, { ...existing, isActive: false, deletedAt, updatedAt: deletedAt });
       return Promise.resolve(true);
     },
   };
@@ -959,68 +1245,91 @@ export function createInMemoryDatastore(): InMemoryDatastore {
     rating: row.rating,
     comment: row.comment,
     isPublished: row.isPublished,
+    isActive: row.isActive,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt,
   });
 
   const reviewsRepo: ReviewsRepository = {
-    listPublishedByProductCursor({ productId, limit, cursor }) {
+    listPublishedByProductCursor({ productId, limit, cursor, rating }) {
       const published = [...reviewsById.values()]
-        .filter((r) => r.productId === productId && r.isPublished)
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .filter((r) => {
+          if (r.productId !== productId || !r.isPublished || !isRecordActive(r)) return false;
+          if (rating !== undefined && r.rating !== rating) return false;
+          return true;
+        })
+        .sort(compareCreatedAtDesc);
 
-      const filtered =
-        cursor !== undefined
-          ? published.filter((r) => {
-              const rMs = r.createdAt.getTime();
-              const cMs = cursor.createdAt.getTime();
-              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
-            })
-          : published;
+      const filtered = applyDescCursor(published, cursor, (r) => r.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
     },
 
-    listAdminCursor({ limit, cursor, productId, isPublished, rating }) {
+    listAdminCursor({
+      limit,
+      cursor,
+      productId,
+      userId,
+      isPublished,
+      rating,
+      query,
+      status,
+      createdFrom,
+      createdTo,
+    }) {
       const matched = [...reviewsById.values()]
         .filter((r) => {
           if (productId !== undefined && r.productId !== productId) return false;
+          if (userId !== undefined && r.userId !== userId) return false;
           if (isPublished !== undefined && r.isPublished !== isPublished) return false;
           if (rating !== undefined && r.rating !== rating) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([r.comment, usersById.get(r.userId)?.displayName ?? null], query)
+          ) {
+            return false;
+          }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
-      const filtered =
-        cursor !== undefined
-          ? matched.filter((r) => {
-              const rMs = r.createdAt.getTime();
-              const cMs = cursor.createdAt.getTime();
-              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
-            })
-          : matched;
+      const filtered = applyDescCursor(matched, cursor, (r) => r.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit).map(toReviewWithAuthor));
     },
 
-    listAdminOffset({ limit, offset, productId, isPublished, rating }) {
+    listAdminOffset({
+      limit,
+      offset,
+      productId,
+      userId,
+      isPublished,
+      rating,
+      query,
+      status,
+      createdFrom,
+      createdTo,
+    }) {
       const matched = [...reviewsById.values()]
         .filter((r) => {
           if (productId !== undefined && r.productId !== productId) return false;
+          if (userId !== undefined && r.userId !== userId) return false;
           if (isPublished !== undefined && r.isPublished !== isPublished) return false;
           if (rating !== undefined && r.rating !== rating) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (
+            query !== undefined &&
+            !matchesFuzzyInMemory([r.comment, usersById.get(r.userId)?.displayName ?? null], query)
+          ) {
+            return false;
+          }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
       return Promise.resolve({
         items: matched.slice(offset, offset + limit).map(toReviewWithAuthor),
@@ -1048,23 +1357,79 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         rating: input.rating,
         comment: input.comment,
         isPublished: true,
+        isActive: true,
         createdAt: now,
         updatedAt: now,
+        deletedAt: null,
       };
       reviewsById.set(created.id, created);
       recomputeProductRating(input.productId);
       return Promise.resolve(toReviewWithAuthor(created));
     },
 
-    updatePublishStateAndSyncRating(reviewId, isPublished) {
-      const existing = reviewsById.get(reviewId);
+    updateOwnReviewAndSyncRating({ productId, userId, rating, comment }) {
+      const existing = [...reviewsById.values()].find(
+        (r) => r.productId === productId && r.userId === userId && isRecordActive(r),
+      );
       if (existing === undefined) {
         return Promise.resolve(null);
       }
       const updated: ProductReviewRow = {
         ...existing,
-        isPublished,
+        ...(rating !== undefined ? { rating } : {}),
+        ...(comment !== undefined ? { comment } : {}),
         updatedAt: new Date(),
+      };
+      reviewsById.set(existing.id, updated);
+      recomputeProductRating(productId);
+      return Promise.resolve(toReviewWithAuthor(updated));
+    },
+
+    softDeleteOwnReviewAndSyncRating({ productId, userId }) {
+      const existing = [...reviewsById.values()].find(
+        (r) => r.productId === productId && r.userId === userId && isRecordActive(r),
+      );
+      if (existing === undefined) {
+        return Promise.resolve(false);
+      }
+      const now = new Date();
+      reviewsById.set(existing.id, {
+        ...existing,
+        isActive: false,
+        isPublished: false,
+        deletedAt: now,
+        updatedAt: now,
+      });
+      recomputeProductRating(productId);
+      return Promise.resolve(true);
+    },
+
+    updatePublishStateAndSyncRating(reviewId, patchOrIsPublished) {
+      const existing = reviewsById.get(reviewId);
+      if (existing === undefined) {
+        return Promise.resolve(null);
+      }
+      const patch =
+        typeof patchOrIsPublished === 'boolean'
+          ? { isPublished: patchOrIsPublished }
+          : patchOrIsPublished;
+      const now = new Date();
+      const nextActive = patch.isActive !== undefined ? patch.isActive : existing.isActive;
+      const nextDeletedAt =
+        patch.isActive !== undefined
+          ? patch.deletedAt !== undefined
+            ? patch.deletedAt
+            : patch.isActive
+              ? null
+              : (existing.deletedAt ?? now)
+          : existing.deletedAt;
+
+      const updated: ProductReviewRow = {
+        ...existing,
+        ...(patch.isPublished !== undefined ? { isPublished: patch.isPublished } : {}),
+        isActive: nextActive,
+        deletedAt: nextDeletedAt,
+        updatedAt: now,
       };
       reviewsById.set(reviewId, updated);
       recomputeProductRating(updated.productId);
@@ -1076,18 +1441,32 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       if (existing === undefined) {
         return Promise.resolve(null);
       }
-      reviewsById.delete(reviewId);
+      const now = new Date();
+      reviewsById.set(reviewId, {
+        ...existing,
+        isActive: false,
+        isPublished: false,
+        deletedAt: existing.deletedAt ?? now,
+        updatedAt: now,
+      });
       recomputeProductRating(existing.productId);
       return Promise.resolve({ productId: existing.productId });
     },
   };
 
   const articlesRepo: ArticlesRepository = {
-    listPublishedCursor({ limit, cursor, tag, query }): Promise<readonly ArticleSummaryRow[]> {
+    listPublishedCursor({
+      limit,
+      cursor,
+      tag,
+      productId,
+      query,
+    }): Promise<readonly ArticleSummaryRow[]> {
       const published = [...articlesById.values()]
         .filter((r) => {
-          if (r.deletedAt !== null || !r.isPublished) return false;
+          if (!isRecordActive(r) || !r.isPublished) return false;
           if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (productId !== undefined && !r.relatedProductIds.includes(productId)) return false;
           if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
             return false;
           }
@@ -1100,59 +1479,69 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           return b.id.localeCompare(a.id);
         });
 
-      const filtered =
-        cursor !== undefined
-          ? published.filter((r) => {
-              const rMs = (r.publishedAt ?? r.createdAt).getTime();
-              const cMs = cursor.createdAt.getTime();
-              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
-            })
-          : published;
+      const filtered = applyDescCursor(published, cursor, (r) => r.publishedAt ?? r.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit).map(toArticleSummary));
     },
 
-    listAdminCursor({ limit, cursor, tag, query }): Promise<readonly ArticleSummaryRow[]> {
+    listAdminCursor({
+      limit,
+      cursor,
+      tag,
+      isPublished,
+      authorId,
+      productId,
+      query,
+      status,
+      createdFrom,
+      createdTo,
+    }): Promise<readonly ArticleSummaryRow[]> {
       const rows = [...articlesById.values()]
         .filter((r) => {
-          if (r.deletedAt !== null) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (isPublished !== undefined && r.isPublished !== isPublished) return false;
+          if (authorId !== undefined && r.authorId !== authorId) return false;
           if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (productId !== undefined && !r.relatedProductIds.includes(productId)) return false;
           if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
             return false;
           }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
-      const filtered =
-        cursor !== undefined
-          ? rows.filter((r) => {
-              const rMs = r.createdAt.getTime();
-              const cMs = cursor.createdAt.getTime();
-              return rMs < cMs || (rMs === cMs && r.id < cursor.id);
-            })
-          : rows;
+      const filtered = applyDescCursor(rows, cursor, (r) => r.createdAt);
 
       return Promise.resolve(filtered.slice(0, limit).map(toArticleSummary));
     },
 
-    listAdminOffset({ limit, offset, tag, query }) {
+    listAdminOffset({
+      limit,
+      offset,
+      tag,
+      isPublished,
+      authorId,
+      productId,
+      query,
+      status,
+      createdFrom,
+      createdTo,
+    }) {
       const rows = [...articlesById.values()]
         .filter((r) => {
-          if (r.deletedAt !== null) return false;
+          if (!matchesStatusFilter(r, status)) return false;
+          if (!matchesDateRange(r.createdAt, createdFrom, createdTo)) return false;
+          if (isPublished !== undefined && r.isPublished !== isPublished) return false;
+          if (authorId !== undefined && r.authorId !== authorId) return false;
           if (tag !== undefined && !r.tags.includes(tag)) return false;
+          if (productId !== undefined && !r.relatedProductIds.includes(productId)) return false;
           if (query !== undefined && !matchesFuzzyInMemory([r.title, r.slug, r.excerpt], query)) {
             return false;
           }
           return true;
         })
-        .sort((a, b) => {
-          const diff = b.createdAt.getTime() - a.createdAt.getTime();
-          return diff !== 0 ? diff : b.id.localeCompare(a.id);
-        });
+        .sort(compareCreatedAtDesc);
 
       return Promise.resolve({
         items: rows.slice(offset, offset + limit).map(toArticleSummary),
@@ -1162,7 +1551,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     findPublishedBySlug(slug): Promise<ArticleRow | null> {
       for (const row of articlesById.values()) {
-        if (row.slug === slug && row.isPublished && row.deletedAt === null) {
+        if (row.slug === slug && row.isPublished && isRecordActive(row)) {
           return Promise.resolve(row);
         }
       }
@@ -1171,12 +1560,12 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     findById(id): Promise<ArticleRow | null> {
       const row = articlesById.get(id);
-      return Promise.resolve(row !== undefined && row.deletedAt === null ? row : null);
+      return Promise.resolve(row ?? null);
     },
 
     findRelatedPublished({ excludeId, tags, limit }): Promise<readonly ArticleSummaryRow[]> {
       const candidates = [...articlesById.values()].filter(
-        (r) => r.id !== excludeId && r.isPublished && r.deletedAt === null,
+        (r) => r.id !== excludeId && r.isPublished && isRecordActive(r),
       );
       const tagMatches = candidates.filter((r) => r.tags.some((t) => tags.includes(t)));
       const rest = candidates.filter((r) => !tagMatches.includes(r));
@@ -1209,10 +1598,11 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         tags: [...input.tags],
         relatedProductIds: [...input.relatedProductIds],
         isPublished: input.isPublished,
+        isActive: input.isActive,
         publishedAt: input.publishedAt,
         createdAt: now,
         updatedAt: now,
-        deletedAt: null,
+        deletedAt: input.deletedAt ?? null,
       };
       assertMediaAttachments(created);
       articlesById.set(created.id, created);
@@ -1221,12 +1611,14 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     updateById(id, patch): Promise<ArticleRow | null> {
       const existing = articlesById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(null);
       }
-      if (patch.slug !== undefined) {
+      const nextDeletedAt = patch.deletedAt !== undefined ? patch.deletedAt : existing.deletedAt;
+      const nextSlug = patch.slug ?? existing.slug;
+      if (nextDeletedAt === null) {
         for (const other of articlesById.values()) {
-          if (other.id !== id && other.deletedAt === null && other.slug === patch.slug) {
+          if (other.id !== id && other.deletedAt === null && other.slug === nextSlug) {
             return Promise.reject(
               new ConflictError('An article with this slug already exists', 'SLUG_ALREADY_EXISTS'),
             );
@@ -1251,6 +1643,8 @@ export function createInMemoryDatastore(): InMemoryDatastore {
           ? { relatedProductIds: [...patch.relatedProductIds] }
           : {}),
         ...(patch.isPublished !== undefined ? { isPublished: patch.isPublished } : {}),
+        ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt } : {}),
         ...(patch.publishedAt !== undefined ? { publishedAt: patch.publishedAt } : {}),
         updatedAt: new Date(),
       };
@@ -1261,10 +1655,10 @@ export function createInMemoryDatastore(): InMemoryDatastore {
 
     softDeleteById(id, deletedAt): Promise<boolean> {
       const existing = articlesById.get(id);
-      if (existing === undefined || existing.deletedAt !== null) {
+      if (existing === undefined) {
         return Promise.resolve(false);
       }
-      articlesById.set(id, { ...existing, deletedAt, updatedAt: deletedAt });
+      articlesById.set(id, { ...existing, isActive: false, deletedAt, updatedAt: deletedAt });
       return Promise.resolve(true);
     },
   };
@@ -1346,10 +1740,13 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         passwordHash: params.passwordHash,
         googleSub: params.googleSub ?? null,
         phone: params.phone ?? null,
+        address: params.address ?? null,
         displayName: params.displayName,
         role: params.role ?? 'user',
+        isActive: true,
         createdAt,
         updatedAt: createdAt,
+        deletedAt: null,
       };
       usersById.set(stored.id, stored);
       return toPublicEntity(stored);

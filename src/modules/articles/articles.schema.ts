@@ -1,19 +1,23 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema, CanonicalUrlSchema } from '@/lib/asset-url.ts';
+import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
 import {
   AdminPaginationQuerySchema,
+  CreatedFromQuerySchema,
+  CreatedToQuerySchema,
   createCursorPageSchema,
   QueryBooleanSchema,
 } from '@/lib/pagination.ts';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { SearchQueryParamSchema } from '@/lib/search.ts';
+import {
+  SeoMetadataCreateFields,
+  SeoMetadataResponseFields,
+  SeoMetadataUpdateFields,
+} from '@/lib/seo.ts';
+import { createSlugSchema } from '@/lib/slug.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
 
-const ArticleSlugSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(280)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase kebab-case');
+const ArticleSlugSchema = createSlugSchema(280);
 
 const TagStringSchema = z
   .string()
@@ -48,14 +52,13 @@ export const ArticleSummarySchema = z
       .openapi({ example: 'cara-memilih-genset-silent-30-kva-untuk-kebutuhan-industri' }),
     excerpt: z.string().nullable(),
     coverImageUrl: z.string().nullable(),
-    metaTitle: z.string().nullable(),
-    metaDescription: z.string().nullable(),
+    ...SeoMetadataResponseFields,
     focusKeyword: z.string().nullable().openapi({ example: 'genset silent 30 kva' }),
-    canonicalUrl: z.string().nullable(),
-    noIndex: z.boolean(),
-    ogImageUrl: z.string().nullable(),
     tags: z.array(z.string()),
     isPublished: z.boolean(),
+    isActive: z.boolean(),
+    status: RecordStatusSchema,
+    deletedAt: z.iso.datetime().nullable(),
     publishedAt: z.iso.datetime().nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -91,6 +94,13 @@ export const ListArticlesQuerySchema = z.object({
     description: 'Filter published articles containing this tag',
     example: 'genset',
   }),
+  productId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'productId', in: 'query' },
+      description: 'Filter published articles linked to this product UUID',
+    }),
   q: SearchQueryParamSchema,
 });
 
@@ -102,7 +112,28 @@ export const ListAdminArticlesQuerySchema = AdminPaginationQuerySchema.extend({
     description: 'Filter articles containing this tag',
     example: 'genset',
   }),
+  isPublished: QueryBooleanSchema.optional().openapi({
+    param: { name: 'isPublished', in: 'query' },
+    description: 'Filter articles by publication state (true = published, false = draft)',
+  }),
+  authorId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'authorId', in: 'query' },
+      description: 'Filter articles by author user UUID',
+    }),
+  productId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'productId', in: 'query' },
+      description: 'Filter articles linked to this product UUID',
+    }),
   q: SearchQueryParamSchema,
+  status: StatusFilterQueryParamSchema,
+  createdFrom: CreatedFromQuerySchema,
+  createdTo: CreatedToQuerySchema,
 });
 
 export type ListAdminArticlesQuery = z.infer<typeof ListAdminArticlesQuerySchema>;
@@ -147,15 +178,12 @@ export const CreateArticleBodySchema = z
     excerpt: z.string().trim().max(600).nullable().optional(),
     contentMd: z.string().trim().min(1).max(200_000),
     coverImageUrl: AssetImageUrlSchema.nullable().optional(),
-    metaTitle: z.string().trim().max(160).nullable().optional(),
-    metaDescription: z.string().trim().max(320).nullable().optional(),
-    focusKeyword: z.string().trim().max(120).nullable().optional(),
-    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
-    noIndex: z.boolean().default(false),
-    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
+    ...SeoMetadataCreateFields,
     tags: UniqueTagsArraySchema.default([]),
     relatedProductIds: UniqueUuidArraySchema.default([]),
     isPublished: z.boolean().default(false),
+    isActive: z.boolean().optional(),
+    status: RecordStatusSchema.optional(),
   })
   .openapi('CreateArticleBody');
 
@@ -168,15 +196,12 @@ export const UpdateArticleBodySchema = z
     excerpt: z.string().trim().max(600).nullable().optional(),
     contentMd: z.string().trim().min(1).max(200_000).optional(),
     coverImageUrl: AssetImageUrlSchema.nullable().optional(),
-    metaTitle: z.string().trim().max(160).nullable().optional(),
-    metaDescription: z.string().trim().max(320).nullable().optional(),
-    focusKeyword: z.string().trim().max(120).nullable().optional(),
-    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
-    noIndex: z.boolean().optional(),
-    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
+    ...SeoMetadataUpdateFields,
     tags: UniqueTagsArraySchema.optional(),
     relatedProductIds: UniqueUuidArraySchema.optional(),
     isPublished: z.boolean().optional(),
+    isActive: z.boolean().optional(),
+    status: RecordStatusSchema.optional(),
   })
   .openapi('UpdateArticleBody');
 

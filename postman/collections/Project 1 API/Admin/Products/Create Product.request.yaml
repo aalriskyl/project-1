@@ -32,7 +32,18 @@ body:
       "specs": {
         "rated_power_kva": 30,
         "voltage": "220/380V"
-      }
+      },
+      "customSpecs": [
+        {
+          "label": "Alternator",
+          "value": "Stamford UCI224D"
+        },
+        {
+          "label": "Noise Level",
+          "value": "68",
+          "unit": "dB @ 7m"
+        }
+      ]
     }
 scripts:
   - type: afterResponse

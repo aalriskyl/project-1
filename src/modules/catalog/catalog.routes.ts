@@ -90,7 +90,7 @@ const listAdminCategoriesRoute = createRoute({
   tags: ['Admin - Catalog'],
   summary: 'Admin: List Categories',
   description:
-    'List all non-deleted categories (including inactive) with cursor or optional numbered `?page=` pagination and `?q=` fuzzy search.',
+    'List categories (active and inactive) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, and `?q=` fuzzy search.',
   security: [{ BearerAuth: [] }],
   request: {
     query: ListAdminCategoriesQuerySchema,
@@ -114,6 +114,41 @@ const listAdminCategoriesRoute = createRoute({
     },
     422: {
       description: 'Invalid pagination or query parameters',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+const getAdminCategoryByIdRoute = createRoute({
+  method: 'get',
+  path: '/{id}',
+  tags: ['Admin - Catalog'],
+  summary: 'Admin: Get Category by ID',
+  description:
+    'Fetch any category (active or inactive) by ID including parent summary, active subcategories, and merged `effectiveSpecSchema`.',
+  security: [{ BearerAuth: [] }],
+  request: {
+    params: CategoryIdParamSchema,
+  },
+  responses: {
+    200: {
+      description: 'Category detail',
+      content: { 'application/json': { schema: CategoryDetailEnvelopeSchema } },
+    },
+    401: {
+      description: 'Unauthorized',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: 'Admin privileges required',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    404: {
+      description: 'Category not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: 'Invalid category UUID',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
@@ -280,6 +315,12 @@ export function createAdminCatalogRoutes(
       const query = c.req.valid('query');
       const page = await catalogService.listAdminCategories(actor, query);
       return c.json(okPage(page, 'Categories retrieved successfully'), 200);
+    })
+    .openapi(getAdminCategoryByIdRoute, async (c) => {
+      const actor = getRequiredAdmin(c);
+      const { id } = c.req.valid('param');
+      const data = await catalogService.getAdminCategoryById(actor, id);
+      return c.json(ok(data, 'Category retrieved successfully'), 200);
     })
     .openapi(createCategoryRoute, async (c) => {
       const actor = getRequiredAdmin(c);

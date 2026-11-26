@@ -285,10 +285,86 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
     expect(newLoginRes.status).toBe(200);
     const newLoginJson = AuthSessionEnvelopeSchema.parse(await newLoginRes.json());
 
-    const logoutRes = await testApp.request('/v1/auth/logout', {
+    // Change password: wrong current password -> 401
+    const wrongCurrentPwRes = await testApp.request('/v1/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${newLoginJson.data.tokens.accessToken}`,
+      },
+      body: JSON.stringify({
+        currentPassword: 'not-the-right-password',
+        newPassword: 'another-brand-new-password-111',
+      }),
+    });
+    expect(wrongCurrentPwRes.status).toBe(401);
+
+    // Change password: new password identical to current -> 422
+    const samePwRes = await testApp.request('/v1/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${newLoginJson.data.tokens.accessToken}`,
+      },
+      body: JSON.stringify({
+        currentPassword: 'brand-new-secure-password-999',
+        newPassword: 'brand-new-secure-password-999',
+      }),
+    });
+    expect(samePwRes.status).toBe(422);
+
+    // Change password: Google-only user (no password hash) -> 409 PASSWORD_NOT_SET
+    const googleOnlyChangePwRes = await testApp.request('/v1/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${googleNew.data.tokens.accessToken}`,
+      },
+      body: JSON.stringify({
+        currentPassword: 'any-current-password-123',
+        newPassword: 'another-brand-new-password-222',
+      }),
+    });
+    expect(googleOnlyChangePwRes.status).toBe(409);
+
+    // Change password: valid -> 204 and revokes active refresh tokens
+    const changePwRes = await testApp.request('/v1/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${newLoginJson.data.tokens.accessToken}`,
+      },
+      body: JSON.stringify({
+        currentPassword: 'brand-new-secure-password-999',
+        newPassword: 'final-rotated-password-2026',
+      }),
+    });
+    expect(changePwRes.status).toBe(204);
+
+    // Refresh token issued prior to password change is now revoked -> 401
+    const revokedAfterChangeRes = await testApp.request('/v1/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: newLoginJson.data.tokens.refreshToken }),
+    });
+    expect(revokedAfterChangeRes.status).toBe(401);
+
+    // Login with the newly changed password succeeds
+    const finalLoginRes = await testApp.request('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'ada@example.com',
+        password: 'final-rotated-password-2026',
+      }),
+    });
+    expect(finalLoginRes.status).toBe(200);
+    const finalLoginJson = AuthSessionEnvelopeSchema.parse(await finalLoginRes.json());
+
+    const logoutRes = await testApp.request('/v1/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: finalLoginJson.data.tokens.refreshToken }),
     });
     expect(logoutRes.status).toBe(204);
   });

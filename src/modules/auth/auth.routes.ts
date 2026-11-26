@@ -4,6 +4,7 @@ import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
 import { ok } from '@/lib/response.ts';
 import {
   AuthSessionEnvelopeSchema,
+  ChangePasswordBodySchema,
   ForgotPasswordBodySchema,
   ForgotPasswordEnvelopeSchema,
   GoogleLoginBodySchema,
@@ -68,6 +69,10 @@ const loginRoute = createRoute({
       description: 'Invalid credentials',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    403: {
+      description: 'Account has been deactivated',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
     422: {
       description: 'Validation failed',
       content: { 'application/json': { schema: ErrorResponseSchema } },
@@ -97,6 +102,10 @@ const googleLoginRoute = createRoute({
     },
     401: {
       description: 'Invalid or unverified Google ID token',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: 'Account has been deactivated',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
     409: {
@@ -183,6 +192,51 @@ const resetPasswordRoute = createRoute({
   },
 });
 
+const changePasswordRoute = createRoute({
+  method: 'post',
+  path: '/change-password',
+  tags: ['Auth'],
+  summary: 'Change Password',
+  description:
+    'Verify the current password, update to a new password, and revoke all active refresh token sessions.',
+  security: [{ BearerAuth: [] }],
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: ChangePasswordBodySchema } },
+    },
+  },
+  responses: {
+    204: {
+      description: 'Password updated and active sessions revoked',
+    },
+    401: {
+      description: 'Unauthorized or current password is incorrect',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    403: {
+      description: 'Account has been deactivated',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    404: {
+      description: 'User not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    409: {
+      description: 'Account has no local password set (Google-only account)',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: 'Validation failed',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    429: {
+      description: 'Auth rate limit exceeded',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
 const refreshRoute = createRoute({
   method: 'post',
   path: '/refresh',
@@ -251,6 +305,7 @@ export function createAuthRoutes(
     router.use('*', authRateLimiter);
   }
   router.use('/google/link', authMiddleware);
+  router.use('/change-password', authMiddleware);
 
   return router
     .openapi(registerRoute, async (c) => {
@@ -280,6 +335,12 @@ export function createAuthRoutes(
     .openapi(resetPasswordRoute, async (c) => {
       const body = c.req.valid('json');
       await authService.resetPassword(body);
+      return c.body(null, 204);
+    })
+    .openapi(changePasswordRoute, async (c) => {
+      const actor = getRequiredUser(c);
+      const body = c.req.valid('json');
+      await authService.changePassword(actor, body);
       return c.body(null, 204);
     })
     .openapi(refreshRoute, async (c) => {

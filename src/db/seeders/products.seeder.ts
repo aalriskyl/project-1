@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import {
+  type ProductCustomSpecRow,
   type ProductMediaItemRow,
   type ProductSpecsMap,
   productSpareparts,
@@ -30,6 +31,7 @@ interface SeedProductSpec {
   readonly isFeatured: boolean;
   readonly media: Omit<ProductMediaItemRow, 'id'>[];
   readonly specs: ProductSpecsMap;
+  readonly customSpecs?: ProductCustomSpecRow[];
   readonly lengthCm: string | null;
   readonly widthCm: string | null;
   readonly heightCm: string | null;
@@ -77,6 +79,11 @@ const PRODUCT_SPECS: readonly SeedProductSpec[] = [
       fuel_type: 'Diesel',
       engine_model: 'Perkins 1103A-33G',
     },
+    customSpecs: [
+      { label: 'Alternator', value: 'Stamford UCI224D' },
+      { label: 'Control Panel', value: 'DeepSea DSE4520' },
+      { label: 'Noise Level', value: '< 68', unit: 'dB @ 7m' },
+    ],
     lengthCm: '215.00',
     widthCm: '95.00',
     heightCm: '125.00',
@@ -324,6 +331,7 @@ async function ensureProduct(
     primaryImageUrl,
     media: mediaWithIds,
     specs: spec.specs,
+    customSpecs: spec.customSpecs ?? [],
     lengthCm: spec.lengthCm,
     widthCm: spec.widthCm,
     heightCm: spec.heightCm,

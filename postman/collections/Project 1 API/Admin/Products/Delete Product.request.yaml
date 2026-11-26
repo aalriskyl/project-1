@@ -5,7 +5,7 @@ order: 4300
 pathVariables:
   - key: id
     value: '{{productId}}'
-    description: Product UUIDv7
+    description: Product UUIDv7 (soft-deletes to status=inactive; restorable via PATCH)
 scripts:
   - type: afterResponse
     language: text/javascript

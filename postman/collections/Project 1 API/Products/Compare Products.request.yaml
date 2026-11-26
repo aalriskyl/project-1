@@ -1,7 +1,25 @@
 $kind: http-request
 method: GET
-url: '{{baseUrl}}/v1/products/compare?slugs=genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50'
+url: '{{baseUrl}}/v1/products/compare?ids={{productId}},{{sparepartProductId}}'
 order: 3000
 queryParams:
+  - key: ids
+    value: '{{productId}},{{sparepartProductId}}'
+    description: Comma-separated 2..4 product UUIDs (mutually exclusive with slugs)
   - key: slugs
     value: genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50
+    disabled: true
+    description: 'Optional alternative: comma-separated 2..4 product slugs (for shareable URLs)'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns aligned specSchema and full product details', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.specSchema).to.be.an('array');
+        pm.expect(json.data.products).to.be.an('array');
+      });

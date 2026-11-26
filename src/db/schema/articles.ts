@@ -41,6 +41,7 @@ export const articles = pgTable(
       .notNull()
       .default(sql`'{}'::uuid[]`),
     isPublished: boolean('is_published').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
     publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),

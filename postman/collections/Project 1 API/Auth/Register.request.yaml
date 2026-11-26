@@ -11,8 +11,9 @@ body:
     {
       "email": "new.customer@tsuzumi.test",
       "password": "correct-horse-battery-staple",
-      "displayName": "Ada Lovelace",
-      "phone": "+6281234567890"
+      "name": "Ada Lovelace",
+      "phone": "+6281234567890",
+      "address": "Jl. Pangeran Jayakarta No. 129, Jakarta Pusat"
     }
 scripts:
   - type: afterResponse

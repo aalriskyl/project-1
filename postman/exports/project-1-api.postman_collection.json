@@ -1,0 +1,3237 @@
+{
+  "info": {
+    "name": "Project 1 API",
+    "description": "Versioned REST API built with Bun, Hono, Zod OpenAPI, and Drizzle ORM on Supabase PostgreSQL.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "Fallback API base URL when no environment is selected"
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "description": "Liveness, database readiness, and OpenAPI specification endpoints.",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Health status is ok', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.eql(true);",
+                  "  pm.expect(body.data.status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 (Supabase pooler reachable)', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Readiness status is ready', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.eql(true);",
+                  "  pm.expect(body.data.status).to.eql('ready');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ready"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI Spec",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('OpenAPI 3.1.0 document returned', () => {",
+                  "  const spec = pm.response.json();",
+                  "  pm.expect(spec.openapi).to.eql('3.1.0');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/openapi.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "openapi.json"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "Custom Argon2id authentication with short-lived HS256 JWT access tokens and rotating SHA-256 refresh tokens.",
+      "auth": {
+        "type": "noauth"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if ([200, 201].includes(pm.response.code)) {",
+              "  const json = pm.response.json();",
+              "  const tokens = json?.data?.tokens;",
+              "  const user = json?.data?.user;",
+              "  if (tokens?.accessToken && tokens?.refreshToken) {",
+              "    pm.environment.set('accessToken', tokens.accessToken);",
+              "    pm.environment.set('refreshToken', tokens.refreshToken);",
+              "  }",
+              "  if (user?.id) {",
+              "    pm.environment.set('userId', user.id);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201 Created', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Returns user and Bearer token pair', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.user.id).to.be.a('string');",
+                  "  pm.expect(json.data.tokens.tokenType).to.eql('Bearer');",
+                  "  pm.expect(json.data.tokens.accessToken).to.be.a('string');",
+                  "  pm.expect(json.data.tokens.refreshToken).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new.customer@tsuzumi.test\",\n  \"password\": \"correct-horse-battery-staple\",\n  \"name\": \"Ada Lovelace\",\n  \"phone\": \"+6281234567890\",\n  \"address\": \"Jl. Pangeran Jayakarta No. 129, Jakarta Pusat\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns authenticated session tokens', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.tokens.accessToken).to.be.a('string');",
+                  "  pm.expect(json.data.tokens.refreshToken).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@tsuzumi.test\",\n  \"password\": \"TsuzumiAdmin2026!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Google Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns authenticated session tokens', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data.tokens.accessToken).to.be.a('string');",
+                  "  pm.expect(json.data.tokens.refreshToken).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"eyJhbGciOiJSUzI1NiIsImtpZCI6Imdvb2dsZS1qd2tzLWtleS1pZCJ9.replace-with-google-oidc-id-token\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/google",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "google"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Link Google Account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Google linked to the authenticated account', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json().data;",
+                  "  pm.environment.set('accessToken', data.tokens.accessToken);",
+                  "  pm.environment.set('refreshToken', data.tokens.refreshToken);",
+                  "  pm.environment.set('userId', data.user.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"replace-with-google-id-token-for-the-same-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/google/link",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "google",
+                "link"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Rotates refresh token and issues new access token', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data.tokens.accessToken).to.be.a('string');",
+                  "  pm.expect(json.data.tokens.refreshToken).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 204 No Content', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});",
+                  "if (pm.response.code === 204) {",
+                  "  pm.environment.set('accessToken', '');",
+                  "  pm.environment.set('refreshToken', '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "logout"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 202 Accepted (anti-enumeration)', () => {",
+                  "  pm.response.to.have.status(202);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"ada@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "forgot-password"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 204 No Content', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"correct-horse-battery-staple\",\n  \"newPassword\": \"brand-new-strong-passphrase-2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "change-password"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 204 No Content', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"replace-with-raw-reset-token-from-email\",\n  \"newPassword\": \"updated-correct-horse-battery-staple\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "reset-password"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "Authenticated user profile endpoints with server-side IDOR ownership checks and cursor pagination.",
+      "item": [
+        {
+          "name": "Get Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns authenticated user profile', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data.id).to.be.a('string');",
+                  "  pm.expect(json.data.email).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Current User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Updates name and address', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data.name).to.eql('Ada Byron');",
+                  "  pm.expect(json.data.address).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Byron\",\n  \"phone\": \"+6281234567890\",\n  \"address\": \"Jl. Industri Raya No. 45, Cikarang, Bekasi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/users/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{userId}}",
+                  "description": "Target user UUIDv7 (must match own ID unless admin)"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Users (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 200 for admin or 403 for standard user', () => {",
+                  "  pm.expect([200, 403]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/users?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Page size (1..100)"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Optional 1-based page number (returns total & totalPages in meta)",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "admin",
+                  "description": "Optional fuzzy text search across displayName, email, phone, and address",
+                  "disabled": true
+                },
+                {
+                  "key": "role",
+                  "value": "user",
+                  "description": "Optional role filter (user or admin)",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Optional lifecycle status filter (active or inactive)",
+                  "disabled": true
+                },
+                {
+                  "key": "createdFrom",
+                  "value": "2026-11-01",
+                  "description": "Optional start date/datetime filter (ISO 8601)",
+                  "disabled": true
+                },
+                {
+                  "key": "createdTo",
+                  "value": "2026-11-30",
+                  "description": "Optional end date/datetime filter (ISO 8601)",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Next page cursor returned from previous response meta.nextCursor",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create User (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201 Created', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  if (json.data?.id) {",
+                  "    pm.environment.set('userId', json.data.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff.member@tsuzumi.test\",\n  \"password\": \"staff-strong-passphrase-2026\",\n  \"name\": \"Staff Member\",\n  \"phone\": \"+6281234567890\",\n  \"address\": \"Jl. Pangeran Jayakarta No. 129, Jakarta Pusat\",\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns updated user fields', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(['active', 'inactive']).to.include(json.data.status);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Byron\",\n  \"email\": \"ada.byron@example.com\",\n  \"phone\": \"+6281234567890\",\n  \"address\": \"Jl. Pangeran Jayakarta No. 129, Jakarta Pusat\",\n  \"role\": \"admin\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/users/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{userId}}",
+                  "description": "Target user UUIDv7"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 204 No Content', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/users/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{userId}}",
+                  "description": "Target user UUIDv7 (cannot delete own account)"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "description": "Public category tree, subcategory detail with inherited spec schemas, and Next.js SEO sitemap feed.",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "List Categories Tree",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Includes Cache-Control and ETag headers', () => {",
+                  "  pm.expect(pm.response.headers.get('ETag')).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/categories?tree=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "tree",
+                  "value": "true",
+                  "description": "Nest subcategories under root categories"
+                },
+                {
+                  "key": "parentId",
+                  "value": "{{categoryId}}",
+                  "description": "Optional parent category UUID filter",
+                  "disabled": true
+                },
+                {
+                  "key": "rootOnly",
+                  "value": "true",
+                  "description": "Optional root filter (true = top-level only, false = subcategories only)",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "perkins",
+                  "description": "Optional fuzzy text search query",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Category By Slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/categories/:slug",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "categories",
+                ":slug"
+              ],
+              "variable": [
+                {
+                  "key": "slug",
+                  "value": "genset-silent",
+                  "description": "Category or subcategory slug"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SEO",
+          "description": "Lightweight SEO sitemap feed for Next.js app/sitemap.ts.",
+          "item": [
+            {
+              "name": "Get SEO Sitemap Feed",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns sitemap slug index', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.data.categories).to.be.an('array');",
+                      "  pm.expect(json.data.articles).to.be.an('array');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/seo/sitemap",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "seo",
+                    "sitemap"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "description": "Zero-join product cards, SKU/FTS search, single-row detail with optional includes, and batched /compare.",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "List & Search Products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns standardized paginated products', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "  const equipment = json.data.find((p) => p.productType === 'equipment');",
+                  "  const sparepart = json.data.find((p) => p.productType === 'sparepart');",
+                  "  if (equipment?.id) {",
+                  "    pm.environment.set('productId', equipment.id);",
+                  "  }",
+                  "  if (sparepart?.id) {",
+                  "    pm.environment.set('sparepartProductId', sparepart.id);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/products?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "price_asc",
+                  "description": "Sort order (newest, price_asc, price_desc, rating_desc)",
+                  "disabled": true
+                },
+                {
+                  "key": "categorySlug",
+                  "value": "genset-silent",
+                  "disabled": true
+                },
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}",
+                  "description": "Optional category UUID filter (mutually exclusive with categorySlug)",
+                  "disabled": true
+                },
+                {
+                  "key": "brandSlug",
+                  "value": "perkins,cummins",
+                  "description": "Optional single or comma-separated brand slugs",
+                  "disabled": true
+                },
+                {
+                  "key": "type",
+                  "value": "equipment",
+                  "description": "Optional product type filter (equipment or sparepart)",
+                  "disabled": true
+                },
+                {
+                  "key": "isFeatured",
+                  "value": "true",
+                  "description": "Optional featured flag filter",
+                  "disabled": true
+                },
+                {
+                  "key": "requiresQuote",
+                  "value": "false",
+                  "description": "Optional RFQ-only flag filter",
+                  "disabled": true
+                },
+                {
+                  "key": "inStock",
+                  "value": "true",
+                  "description": "Optional stock filter (true for stock > 0, false for stock = 0)",
+                  "disabled": true
+                },
+                {
+                  "key": "minRating",
+                  "value": "4",
+                  "description": "Optional minimum average star rating (1..5)",
+                  "disabled": true
+                },
+                {
+                  "key": "minPrice",
+                  "value": "1000000",
+                  "description": "Optional minimum price in IDR",
+                  "disabled": true
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "300000000",
+                  "description": "Optional maximum price in IDR",
+                  "disabled": true
+                },
+                {
+                  "key": "specs",
+                  "value": "rated_power_kva:gte:30,silent_canopy:eq:true",
+                  "description": "Dynamic JSONB spec filters (comma-separated key:op:value; ops eq, gt, gte, lt, lte, contains)",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "TPG30",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "Next page cursor returned from previous response meta.nextCursor",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Product Detail By Slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/products/:slug?include=spareparts,related",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "products",
+                ":slug"
+              ],
+              "query": [
+                {
+                  "key": "include",
+                  "value": "spareparts,related"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "slug",
+                  "value": "genset-30-kva-silent-diesel-tsuzumi-tpg30"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Compare Products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns aligned specSchema and full product details', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.specSchema).to.be.an('array');",
+                  "  pm.expect(json.data.products).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/products/compare?ids={{productId}},{{sparepartProductId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "products",
+                "compare"
+              ],
+              "query": [
+                {
+                  "key": "ids",
+                  "value": "{{productId}},{{sparepartProductId}}",
+                  "description": "Comma-separated 2..4 product UUIDs (mutually exclusive with slugs)"
+                },
+                {
+                  "key": "slugs",
+                  "value": "genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50",
+                  "description": "Optional alternative: comma-separated 2..4 product slugs (for shareable URLs)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Product Recommendations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/products/recommendations?limit=6",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "products",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "6"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Spareparts",
+          "description": "Public compatible spare parts lookup for equipment products.",
+          "item": [
+            {
+              "name": "List Product Spareparts",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized paginated spareparts list', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('sparepartProductId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/products/:id/spareparts?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "products",
+                    ":id",
+                    "spareparts"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "q",
+                      "value": "oil filter",
+                      "description": "Optional fuzzy search query over compatible spare parts",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Parent equipment product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Reviews",
+          "description": "Public product reviews feed and authenticated review submission.",
+          "item": [
+            {
+              "name": "List Product Reviews",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns cursor-paginated product reviews', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  pm.expect(json.meta).to.be.an('object');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('reviewId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/products/:id/reviews?limit=10",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "products",
+                    ":id",
+                    "reviews"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "10"
+                    },
+                    {
+                      "key": "rating",
+                      "value": "5",
+                      "description": "Optional exact star rating filter (1..5)",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7 (auto-populated by List & Search Products)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Product Review",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 201 Created', () => {",
+                      "  pm.response.to.have.status(201);",
+                      "});",
+                      "if (pm.response.code === 201) {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  if (json.data?.id) {",
+                      "    pm.environment.set('reviewId', json.data.id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{accessToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Mesin halus, pengiriman tepat waktu, dan purna jual responsif.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/products/:id/reviews",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "products",
+                    ":id",
+                    "reviews"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7 (auto-populated by List & Search Products)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Own Product Review",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns updated review envelope', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.rating).to.eql(4);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{accessToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rating\": 4,\n  \"comment\": \"Updated review after 3 months of daily operation.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/products/:id/reviews/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "products",
+                    ":id",
+                    "reviews",
+                    "me"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Own Product Review",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 204 No Content', () => {",
+                      "  pm.response.to.have.status(204);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{accessToken}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/products/:id/reviews/me",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "products",
+                    ":id",
+                    "reviews",
+                    "me"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Articles",
+      "description": "Public SEO Markdown articles with cursor pagination, tag filtering, and related product/article hydration.",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "List Published Articles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/articles?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "articles"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "tag",
+                  "value": "genset",
+                  "disabled": true
+                },
+                {
+                  "key": "productId",
+                  "value": "{{productId}}",
+                  "description": "Optional filter for published articles linked to this product UUID",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "genset silent",
+                  "description": "Optional fuzzy text search query",
+                  "disabled": true
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Article By Slug",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns standardized article envelope', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  if (json.data?.id) {",
+                  "    pm.environment.set('articleId', json.data.id);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/articles/:slug?includeRelated=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "articles",
+                ":slug"
+              ],
+              "query": [
+                {
+                  "key": "includeRelated",
+                  "value": "true"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "slug",
+                  "value": "cara-memilih-genset-silent-30-kva-vs-50-kva"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Backoffice CRUD endpoints requiring BearerAuth with role === 'admin'.",
+      "item": [
+        {
+          "name": "Categories",
+          "description": "Admin category and taxonomy CRUD endpoints.",
+          "item": [
+            {
+              "name": "List Admin Categories",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized category list', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('categoryId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/categories?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "categories"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Optional 1-based page number (returns total & totalPages in meta)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "q",
+                      "value": "perkins",
+                      "description": "Optional fuzzy text search query",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "active",
+                      "description": "Optional lifecycle status filter (active or inactive)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "parentId",
+                      "value": "{{categoryId}}",
+                      "description": "Optional parent category UUID filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "rootOnly",
+                      "value": "true",
+                      "description": "Optional root filter (true = top-level only, false = subcategories only)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Admin Category By ID",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns category detail with status and effectiveSpecSchema', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "  pm.expect(['active', 'inactive']).to.include(json.data.status);",
+                      "  pm.expect(json.data.effectiveSpecSchema).to.be.an('array');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/categories/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "categories",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{categoryId}}",
+                      "description": "Category UUIDv7 (active or inactive)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 201 Created', () => {",
+                      "  pm.response.to.have.status(201);",
+                      "});",
+                      "if (pm.response.code === 201) {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  if (json.data?.id) {",
+                      "    pm.environment.set('categoryId', json.data.id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Genset Silent\",\n  \"description\": \"Industrial silent diesel generator sets 10-500 kVA.\",\n  \"metaTitle\": \"Jual Genset Silent 10-500 kVA | Tsuzumi Japan\",\n  \"metaDescription\": \"Distributor resmi genset silent diesel Tsuzumi Japan 10-500 kVA bergaransi.\",\n  \"focusKeyword\": \"genset silent\",\n  \"noIndex\": false,\n  \"ogImageUrl\": \"{{uploadedPublicUrl}}\",\n  \"specSchema\": [\n    {\n      \"key\": \"rated_power_kva\",\n      \"label\": \"Rated Power\",\n      \"unit\": \"kVA\",\n      \"type\": \"number\",\n      \"sortOrder\": 10\n    },\n    {\n      \"key\": \"voltage\",\n      \"label\": \"Voltage\",\n      \"unit\": \"V\",\n      \"type\": \"text\",\n      \"sortOrder\": 20\n    }\n  ],\n  \"sortOrder\": 10,\n  \"isActive\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "categories"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns updated category envelope', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"metaTitle\": \"Jual Genset Silent 10-500 kVA Resmi | Tsuzumi Japan\",\n  \"focusKeyword\": \"genset silent\",\n  \"noIndex\": false,\n  \"status\": \"active\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/categories/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "categories",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{categoryId}}",
+                      "description": "Category UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 204 No Content', () => {",
+                      "  pm.response.to.have.status(204);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/categories/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "categories",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{categoryId}}",
+                      "description": "Category UUIDv7 (soft-deletes to status=inactive; must have no active subcategories or products)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Products",
+          "description": "Admin product catalog and spare-part linking endpoints.",
+          "item": [
+            {
+              "name": "List Admin Products",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized paginated products list', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('productId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Optional 1-based page number (returns total & totalPages in meta)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "q",
+                      "value": "gensset perkns",
+                      "description": "Optional fuzzy text search query",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "active",
+                      "description": "Optional lifecycle status filter (active or inactive)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "categoryId",
+                      "value": "{{categoryId}}",
+                      "description": "Optional category UUID filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "brandSlug",
+                      "value": "perkins,cummins",
+                      "description": "Optional single or comma-separated brand slugs",
+                      "disabled": true
+                    },
+                    {
+                      "key": "type",
+                      "value": "equipment",
+                      "description": "Optional product type filter (equipment or sparepart)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "isFeatured",
+                      "value": "true",
+                      "description": "Optional featured flag filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "requiresQuote",
+                      "value": "false",
+                      "description": "Optional RFQ-only flag filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "inStock",
+                      "value": "true",
+                      "description": "Optional stock filter (true for stock > 0, false for stock = 0)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdFrom",
+                      "value": "2026-11-01",
+                      "description": "Optional start date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdTo",
+                      "value": "2026-11-30",
+                      "description": "Optional end date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 201 Created', () => {",
+                      "  pm.response.to.have.status(201);",
+                      "});",
+                      "if (pm.response.code === 201) {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  if (json.data?.id) {",
+                      "    pm.environment.set('productId', json.data.id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"categoryId\": \"{{categoryId}}\",\n  \"brandSlug\": \"perkins\",\n  \"name\": \"Genset 30 kVA Silent Diesel Tsuzumi TPG30\",\n  \"sku\": \"TPG30-SILENT\",\n  \"metaTitle\": \"Genset 30 kVA Silent Perkins Tsuzumi TPG30 | Harga & Spesifikasi\",\n  \"focusKeyword\": \"genset 30 kva silent perkins\",\n  \"noIndex\": false,\n  \"ogImageUrl\": \"{{uploadedPublicUrl}}\",\n  \"priceIdr\": 177500000,\n  \"requiresQuote\": true,\n  \"stock\": 2,\n  \"isFeatured\": true,\n  \"weightKg\": 920.5,\n  \"media\": [\n    {\n      \"type\": \"image\",\n      \"url\": \"{{uploadedPublicUrl}}\",\n      \"altText\": \"Genset 30 kVA Silent Tsuzumi TPG30\"\n    }\n  ],\n  \"specs\": {\n    \"rated_power_kva\": 30,\n    \"voltage\": \"220/380V\"\n  },\n  \"customSpecs\": [\n    {\n      \"label\": \"Alternator\",\n      \"value\": \"Stamford UCI224D\"\n    },\n    {\n      \"label\": \"Noise Level\",\n      \"value\": \"68\",\n      \"unit\": \"dB @ 7m\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Admin Product By ID",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized product detail', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns updated product envelope', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"stock\": 5,\n  \"isFeatured\": true,\n  \"focusKeyword\": \"genset 30 kva silent perkins\",\n  \"noIndex\": false,\n  \"status\": \"active\",\n  \"customSpecs\": [\n    {\n      \"label\": \"Alternator\",\n      \"value\": \"Stamford UCI224D\"\n    },\n    {\n      \"label\": \"Control Panel\",\n      \"value\": \"DeepSea DSE4520\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 204 No Content', () => {",
+                      "  pm.response.to.have.status(204);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Product UUIDv7 (soft-deletes to status=inactive; restorable via PATCH)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Replace Product Spareparts",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns updated sparepart links', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"items\": [\n    {\n      \"sparepartProductId\": \"{{sparepartProductId}}\",\n      \"note\": \"Ganti setiap 250 jam operasi\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/products/:id/spareparts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "products",
+                    ":id",
+                    "spareparts"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{productId}}",
+                      "description": "Parent equipment product UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Articles",
+          "description": "Admin SEO article publishing and management endpoints.",
+          "item": [
+            {
+              "name": "List Admin Articles",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized paginated articles list', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('articleId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/articles?limit=10",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "articles"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "10"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Optional 1-based page number (returns total & totalPages in meta)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "tag",
+                      "value": "genset",
+                      "disabled": true
+                    },
+                    {
+                      "key": "isPublished",
+                      "value": "false",
+                      "description": "Optional publication state filter (true = published, false = draft)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "authorId",
+                      "value": "{{userId}}",
+                      "description": "Optional author user UUID filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "productId",
+                      "value": "{{productId}}",
+                      "description": "Optional filter for articles linked to this product UUID",
+                      "disabled": true
+                    },
+                    {
+                      "key": "q",
+                      "value": "aspall",
+                      "description": "Optional fuzzy text search query",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "active",
+                      "description": "Optional lifecycle status filter (active or inactive)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdFrom",
+                      "value": "2026-11-01",
+                      "description": "Optional start date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdTo",
+                      "value": "2026-11-30",
+                      "description": "Optional end date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create SEO Article",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 201 Created', () => {",
+                      "  pm.response.to.have.status(201);",
+                      "});",
+                      "if (pm.response.code === 201) {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  if (json.data?.id) {",
+                      "    pm.environment.set('articleId', json.data.id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Cara Memilih Genset Silent 30 kVA untuk Industri\",\n  \"excerpt\": \"Panduan lengkap memilih kapasitas, mesin Perkins/Cummins, dan perawatan genset silent.\",\n  \"contentMd\": \"## 1. Hitung Kebutuhan Daya (kVA)\\n\\nPastikan cadangan daya minimal 20%...\",\n  \"coverImageUrl\": \"{{uploadedPublicUrl}}\",\n  \"metaTitle\": \"Cara Memilih Genset Silent 30 kVA | Tsuzumi Japan\",\n  \"metaDescription\": \"Panduan memilih kapasitas genset silent 30 kVA, engine Perkins vs Cummins, dan jadwal perawatan.\",\n  \"focusKeyword\": \"genset silent 30 kva\",\n  \"noIndex\": false,\n  \"ogImageUrl\": \"{{uploadedPublicUrl}}\",\n  \"tags\": [\"genset\", \"perkins\", \"industri\"],\n  \"isPublished\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/articles",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "articles"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Admin Article By ID",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized article detail', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/articles/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "articles",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{articleId}}",
+                      "description": "Article UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update SEO Article",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns updated article envelope', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data.id).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isPublished\": true,\n  \"focusKeyword\": \"genset silent 30 kva\",\n  \"noIndex\": false,\n  \"status\": \"active\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/articles/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "articles",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{articleId}}",
+                      "description": "Article UUIDv7"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete SEO Article",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 204 No Content', () => {",
+                      "  pm.response.to.have.status(204);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/articles/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "articles",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{articleId}}",
+                      "description": "Article UUIDv7 (soft-deletes to status=inactive; restorable via PATCH)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Media",
+          "description": "Request a signed URL, PUT the binary image to Storage, complete verification, then attach the verified public URL. Cleanup deletes only unreferenced assets older than the grace window.",
+          "item": [
+            {
+              "name": "Create Presigned Media Upload URL",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 201 Created', () => {",
+                      "  pm.response.to.have.status(201);",
+                      "});",
+                      "if (pm.response.code === 201) {",
+                      "  const json = pm.response.json();",
+                      "  pm.environment.set('uploadUrl', json.data.uploadUrl);",
+                      "  pm.environment.set('uploadId', json.data.uploadId);",
+                      "  pm.environment.unset('uploadedPublicUrl');",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"folder\": \"products\",\n  \"contentType\": \"{{uploadContentType}}\",\n  \"contentLengthBytes\": {{uploadContentLengthBytes}}\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/media/upload-url",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "media",
+                    "upload-url"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Upload Image From PC to Signed URL",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('File uploaded to Supabase Storage (200 OK)', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "{{uploadContentType}}",
+                    "type": "text",
+                    "description": "Match the contentType requested in Create Presigned Media Upload URL (image/png, image/jpeg, image/webp, image/avif)"
+                  }
+                ],
+                "body": {
+                  "mode": "file",
+                  "file": {
+                    "src": ""
+                  }
+                },
+                "url": {
+                  "raw": "{{uploadUrl}}",
+                  "host": [
+                    "{{uploadUrl}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Complete Media Upload",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Upload is verified', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "  const data = pm.response.json().data;",
+                      "  pm.expect(data.status).to.eql('verified');",
+                      "  pm.expect(data.uploadId).to.eql(pm.environment.get('uploadId'));",
+                      "  pm.environment.set('uploadedPublicUrl', data.publicUrl);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/media/{{uploadId}}/complete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "media",
+                    "{{uploadId}}",
+                    "complete"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Cleanup Orphaned Media",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns orphan sweep counts', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.data.scannedCount).to.be.a('number');",
+                      "  pm.expect(json.data.deletedCount).to.be.a('number');",
+                      "  pm.expect(json.data.deletedPaths).to.be.an('array');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"olderThanHours\": 24,\n  \"limit\": 100\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/media/cleanup-orphans",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "media",
+                    "cleanup-orphans"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Reviews",
+          "description": "Admin product review moderation and deletion endpoints.",
+          "item": [
+            {
+              "name": "List Admin Reviews",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized paginated reviews list', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  if (json.data[0]?.id) {",
+                      "    pm.environment.set('reviewId', json.data[0].id);",
+                      "  }",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/reviews?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "reviews"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": "Optional 1-based page number (returns total & totalPages in meta)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "isPublished",
+                      "value": "true",
+                      "disabled": true
+                    },
+                    {
+                      "key": "rating",
+                      "value": "5",
+                      "disabled": true
+                    },
+                    {
+                      "key": "productId",
+                      "value": "{{productId}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "userId",
+                      "value": "{{userId}}",
+                      "description": "Optional author user UUID filter",
+                      "disabled": true
+                    },
+                    {
+                      "key": "q",
+                      "value": "bagus",
+                      "description": "Optional fuzzy search over review comment and author name",
+                      "disabled": true
+                    },
+                    {
+                      "key": "status",
+                      "value": "active",
+                      "description": "Optional lifecycle status filter (active or inactive)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdFrom",
+                      "value": "2026-11-01",
+                      "description": "Optional start date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "createdTo",
+                      "value": "2026-11-30",
+                      "description": "Optional end date/datetime filter (ISO 8601)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "cursor",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Moderate Product Review",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns standardized review envelope', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.success).to.eql(true);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isPublished\": true,\n  \"status\": \"active\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/reviews/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "reviews",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{reviewId}}",
+                      "description": "Product review UUIDv7 (auto-populated by List/Create Product Review)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Product Review",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 204 No Content', () => {",
+                      "  pm.response.to.have.status(204);",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/reviews/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "reviews",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{reviewId}}",
+                      "description": "Product review UUIDv7 (soft-deletes to status=inactive and recalculates rating; restorable via PATCH)"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

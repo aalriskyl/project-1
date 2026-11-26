@@ -175,12 +175,102 @@ describe('Users HTTP routes (/v1/users)', () => {
         Authorization: `Bearer ${user1Token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ displayName: 'User One Updated', phone: '+6281299998888' }),
+      body: JSON.stringify({
+        name: 'User One Updated',
+        phone: '+6281299998888',
+        address: 'Jl. Industri Raya No. 45, Bekasi',
+      }),
     });
     expect(validPatch.status).toBe(200);
     const patchedBody = UserEnvelopeSchema.parse(await validPatch.json());
+    expect(patchedBody.data.name).toBe('User One Updated');
     expect(patchedBody.data.displayName).toBe('User One Updated');
     expect(patchedBody.data.phone).toBe('+6281299998888');
+    expect(patchedBody.data.address).toBe('Jl. Industri Raya No. 45, Bekasi');
+
+    // Admin can update user name, email, phone, and address via PATCH /v1/users/:id
+    const adminUpdateRes = await testApp.request(`/v1/users/${user2.id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'User Two Renamed',
+        email: 'user2.updated@example.com',
+        phone: '+6281300001111',
+        address: 'Jl. Raya Darmo No. 88, Surabaya',
+      }),
+    });
+    expect(adminUpdateRes.status).toBe(200);
+    const adminUpdated = UserEnvelopeSchema.parse(await adminUpdateRes.json()).data;
+    expect(adminUpdated.name).toBe('User Two Renamed');
+    expect(adminUpdated.email).toBe('user2.updated@example.com');
+    expect(adminUpdated.phone).toBe('+6281300001111');
+    expect(adminUpdated.address).toBe('Jl. Raya Darmo No. 88, Surabaya');
+
+    // Duplicate email update returns 409
+    const dupEmailUpdate = await testApp.request(`/v1/users/${user2.id}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email: user1.email }),
+    });
+    expect(dupEmailUpdate.status).toBe(409);
+
+    // Admin cannot demote own role (409), can promote user2 to admin (200), and can create staff users (201)
+    expect(
+      (
+        await testApp.request('/v1/users/01936c8e-7f2a-7000-8000-000000000003', {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user' }),
+        })
+      ).status,
+    ).toBe(409);
+
+    const promoteRes = await testApp.request(`/v1/users/${user2.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'admin' }),
+    });
+    expect(promoteRes.status).toBe(200);
+    expect(UserEnvelopeSchema.parse(await promoteRes.json()).data.role).toBe('admin');
+
+    expect(
+      (
+        await testApp.request('/v1/users', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${user1Token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: 'forbidden.staff@example.com',
+            password: 'staff-strong-passphrase-2026',
+            name: 'Forbidden Staff',
+            role: 'admin',
+          }),
+        })
+      ).status,
+    ).toBe(403);
+
+    const createStaffRes = await testApp.request('/v1/users', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'staff@example.com',
+        password: 'staff-strong-passphrase-2026',
+        name: 'Tsuzumi Staff',
+        phone: '+6281122334455',
+        address: 'Jakarta Pusat',
+        role: 'admin',
+      }),
+    });
+    expect(createStaffRes.status).toBe(201);
+    const createdStaff = UserEnvelopeSchema.parse(await createStaffRes.json()).data;
+    expect(createdStaff.role).toBe('admin');
+    expect(createdStaff.name).toBe('Tsuzumi Staff');
+    expect(createdStaff.address).toBe('Jakarta Pusat');
 
     const idorRes = await testApp.request(`/v1/users/${user2.id}`, {
       headers: { Authorization: `Bearer ${user1Token}` },
@@ -192,13 +282,14 @@ describe('Users HTTP routes (/v1/users)', () => {
     });
     expect(invalidUuidRes.status).toBe(422);
 
-    // Cursor pagination as admin (limit=2 across 3 users)
+    // Cursor pagination as admin (limit=2 across 4 users)
     const page1Res = await testApp.request('/v1/users?limit=2', {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
     expect(page1Res.status).toBe(200);
     const page1 = UserCursorPageSchema.parse(await page1Res.json());
     expect(page1.data).toHaveLength(2);
+    expect(page1.data.some((u) => u.id === createdStaff.id)).toBe(true);
     expect(page1.meta.hasMore).toBe(true);
     expect(page1.meta.nextCursor).not.toBeNull();
 
@@ -210,8 +301,8 @@ describe('Users HTTP routes (/v1/users)', () => {
     );
     expect(page2Res.status).toBe(200);
     const page2 = UserCursorPageSchema.parse(await page2Res.json());
-    expect(page2.data).toHaveLength(1);
-    expect(page2.data[0]?.id).toBe(user1.id);
+    expect(page2.data).toHaveLength(2);
+    expect(page2.data.some((u) => u.id === user1.id)).toBe(true);
     expect(page2.meta.hasMore).toBe(false);
 
     const overLimitRes = await testApp.request('/v1/users?limit=500', {
@@ -223,5 +314,93 @@ describe('Users HTTP routes (/v1/users)', () => {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
     expect(badCursorRes.status).toBe(422);
+
+    // Admin users date-range filter (invalid range -> 422, future -> 0) and address search
+    expect(
+      (
+        await testApp.request('/v1/users?createdFrom=2030-02-01&createdTo=2030-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(422);
+
+    const futureUsers = UserCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/users?createdFrom=2099-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(futureUsers.data).toHaveLength(0);
+
+    const usersByAddress = UserCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/users?q=Jakarta', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(usersByAddress.data.some((u) => u.id === createdStaff.id)).toBe(true);
+
+    // Non-admin cannot delete users (403); admin cannot delete self (409)
+    expect(
+      (
+        await testApp.request(`/v1/users/${user2.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${user1Token}` },
+        })
+      ).status,
+    ).toBe(403);
+
+    const adminSelfDel = await testApp.request('/v1/users/01936c8e-7f2a-7000-8000-000000000003', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(adminSelfDel.status).toBe(409);
+
+    // Admin soft-deletes user1 -> status='inactive', user1 blocked on /me (403), filterable & restorable via PATCH
+    const delUserRes = await testApp.request(`/v1/users/${user1.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(delUserRes.status).toBe(204);
+
+    expect(
+      (
+        await testApp.request('/v1/users/me', {
+          headers: { Authorization: `Bearer ${user1Token}` },
+        })
+      ).status,
+    ).toBe(403);
+
+    const inactiveUsers = UserCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/users?status=inactive', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(inactiveUsers.data).toHaveLength(1);
+    expect(inactiveUsers.data[0]?.id).toBe(user1.id);
+    expect(inactiveUsers.data[0]?.status).toBe('inactive');
+    expect(inactiveUsers.data[0]?.deletedAt).not.toBeNull();
+
+    const restoreUserRes = await testApp.request(`/v1/users/${user1.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    expect(restoreUserRes.status).toBe(200);
+    const restoredUser = UserEnvelopeSchema.parse(await restoreUserRes.json()).data;
+    expect(restoredUser.status).toBe('active');
+    expect(restoredUser.deletedAt).toBeNull();
+
+    expect(
+      (
+        await testApp.request('/v1/users/me', {
+          headers: { Authorization: `Bearer ${user1Token}` },
+        })
+      ).status,
+    ).toBe(200);
   });
 });

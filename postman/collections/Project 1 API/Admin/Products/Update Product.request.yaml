@@ -16,7 +16,18 @@ body:
       "stock": 5,
       "isFeatured": true,
       "focusKeyword": "genset 30 kva silent perkins",
-      "noIndex": false
+      "noIndex": false,
+      "status": "active",
+      "customSpecs": [
+        {
+          "label": "Alternator",
+          "value": "Stamford UCI224D"
+        },
+        {
+          "label": "Control Panel",
+          "value": "DeepSea DSE4520"
+        }
+      ]
     }
 scripts:
   - type: afterResponse

@@ -8,6 +8,10 @@ queryParams:
   - key: tag
     value: genset
     disabled: true
+  - key: productId
+    value: '{{productId}}'
+    disabled: true
+    description: Optional filter for published articles linked to this product UUID
   - key: q
     value: genset silent
     disabled: true

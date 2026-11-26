@@ -1,22 +1,37 @@
 import { z } from '@hono/zod-openapi';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { PhoneE164Schema, UserSchema } from '@/modules/users/users.schema.ts';
+import {
+  PhoneE164Schema,
+  UserAddressSchema,
+  UserEmailSchema,
+  UserSchema,
+} from '@/modules/users/users.schema.ts';
 
 export const RegisterBodySchema = z
   .strictObject({
-    email: z
-      .email()
-      .max(255)
-      .transform((value) => value.trim().toLowerCase())
-      .openapi({ example: 'ada@example.com' }),
+    email: UserEmailSchema,
     password: z
       .string()
       .min(12, 'Password must be at least 12 characters')
       .max(128, 'Password must be at most 128 characters')
       .openapi({ example: 'correct-horse-battery-staple' }),
-    displayName: z.string().trim().min(1).max(120).openapi({ example: 'Ada Lovelace' }),
+    name: z.string().trim().min(1).max(120).optional().openapi({ example: 'Ada Lovelace' }),
+    displayName: z.string().trim().min(1).max(120).optional().openapi({ example: 'Ada Lovelace' }),
     phone: PhoneE164Schema.optional().openapi({ example: '+6281234567890' }),
+    address: UserAddressSchema.optional(),
   })
+  .refine((body) => body.name !== undefined || body.displayName !== undefined, {
+    path: ['name'],
+    message: 'Provide name (or displayName)',
+  })
+  .refine(
+    (body) =>
+      body.name === undefined || body.displayName === undefined || body.name === body.displayName,
+    {
+      path: ['name'],
+      message: 'name and displayName must match when both are provided',
+    },
+  )
   .openapi('RegisterBody');
 
 export type RegisterBody = z.infer<typeof RegisterBodySchema>;
@@ -67,6 +82,27 @@ export const ResetPasswordBodySchema = z
   .openapi('ResetPasswordBody');
 
 export type ResetPasswordBody = z.infer<typeof ResetPasswordBodySchema>;
+
+export const ChangePasswordBodySchema = z
+  .strictObject({
+    currentPassword: z
+      .string()
+      .min(1)
+      .max(128)
+      .openapi({ example: 'correct-horse-battery-staple' }),
+    newPassword: z
+      .string()
+      .min(12, 'Password must be at least 12 characters')
+      .max(128, 'Password must be at most 128 characters')
+      .openapi({ example: 'brand-new-strong-passphrase-2026' }),
+  })
+  .refine((body) => body.newPassword !== body.currentPassword, {
+    path: ['newPassword'],
+    message: 'New password must be different from the current password',
+  })
+  .openapi('ChangePasswordBody');
+
+export type ChangePasswordBody = z.infer<typeof ChangePasswordBodySchema>;
 
 export const RefreshBodySchema = z
   .strictObject({

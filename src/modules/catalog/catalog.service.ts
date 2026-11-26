@@ -1,15 +1,10 @@
 import type { CategoryRow, SpecFieldDefRow } from '@/db/schema/categories.ts';
 import { ConflictError, NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
-import {
-  assertCursorOrPage,
-  buildOffsetPage,
-  type CursorPage,
-  decodeCursor,
-  encodeCursor,
-} from '@/lib/pagination.ts';
+import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
 import { slugify } from '@/lib/slug.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
 import type {
@@ -35,6 +30,7 @@ export interface CatalogService {
     actor: AuthUser,
     query: ListAdminCategoriesQuery,
   ): Promise<CursorPage<PublicCategory>>;
+  getAdminCategoryById(actor: AuthUser, id: string): Promise<CategoryDetail>;
   createCategory(actor: AuthUser, input: CreateCategoryBody): Promise<PublicCategory>;
   updateCategory(actor: AuthUser, id: string, input: UpdateCategoryBody): Promise<PublicCategory>;
   deleteCategory(actor: AuthUser, id: string): Promise<void>;
@@ -67,7 +63,9 @@ export function serializeCategory(row: CategoryRow): PublicCategory {
     bannerImageUrl: row.bannerImageUrl,
     specSchema: row.specSchema.map(serializeSpecField),
     sortOrder: row.sortOrder,
-    isActive: row.isActive,
+    isActive: isRecordActive(row),
+    status: toRecordStatus(row),
+    deletedAt: row.deletedAt !== null ? row.deletedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -112,7 +110,7 @@ export function createCatalogService(
     }
 
     const parent = await catalogRepo.findById(parentId);
-    if (parent === null) {
+    if (parent === null || !isRecordActive(parent)) {
       throw new NotFoundError('Parent category not found', 'PARENT_CATEGORY_NOT_FOUND');
     }
 
@@ -138,8 +136,16 @@ export function createCatalogService(
     async listPublicCategories(
       query: ListCategoriesQuery,
     ): Promise<readonly (PublicCategory | CategoryTreeNode)[]> {
+      const hasFilter =
+        query.q !== undefined || query.parentId !== undefined || query.rootOnly !== undefined;
       const rows = await catalogRepo.listActive(
-        query.q !== undefined ? { query: query.q } : undefined,
+        hasFilter
+          ? {
+              ...(query.q !== undefined ? { query: query.q } : {}),
+              ...(query.parentId !== undefined ? { parentId: query.parentId } : {}),
+              ...(query.rootOnly !== undefined ? { rootOnly: query.rootOnly } : {}),
+            }
+          : undefined,
       );
       const serialized = rows.map(serializeCategory);
 
@@ -149,19 +155,22 @@ export function createCatalogService(
 
       // If a fuzzy search matched a subcategory without matching its parent, include the active parent so the tree stays intact.
       const byId = new Map(serialized.map((item) => [item.id, item]));
-      const missingParentIds = [
-        ...new Set(
-          serialized
-            .map((item) => item.parentId)
-            .filter((pid): pid is string => pid !== null && !byId.has(pid)),
-        ),
-      ];
+      const missingParentIds =
+        query.parentId === undefined && query.rootOnly === undefined
+          ? [
+              ...new Set(
+                serialized
+                  .map((item) => item.parentId)
+                  .filter((pid): pid is string => pid !== null && !byId.has(pid)),
+              ),
+            ]
+          : [];
       if (missingParentIds.length > 0) {
         const fetchedParents = await Promise.all(
           missingParentIds.map((pid) => catalogRepo.findById(pid)),
         );
         for (const parent of fetchedParents) {
-          if (parent !== null && parent.isActive) {
+          if (parent !== null && isRecordActive(parent)) {
             byId.set(parent.id, serializeCategory(parent));
           }
         }
@@ -201,7 +210,7 @@ export function createCatalogService(
           : Promise.resolve([]),
       ]);
 
-      const parentActive = parentRow !== null && parentRow.isActive ? parentRow : null;
+      const parentActive = parentRow !== null && isRecordActive(parentRow) ? parentRow : null;
       if (category.parentId !== null && parentActive === null) {
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
@@ -245,37 +254,58 @@ export function createCatalogService(
       query: ListAdminCategoriesQuery,
     ): Promise<CursorPage<PublicCategory>> {
       assertAdminUser(actor);
-      assertCursorOrPage(query);
 
-      if (query.page !== undefined) {
-        const offset = (query.page - 1) * query.limit;
-        const { items, total } = await catalogRepo.listAdminOffset({
-          limit: query.limit,
-          offset,
-          ...(query.q !== undefined ? { query: query.q } : {}),
-        });
-        return buildOffsetPage(items.map(serializeCategory), total, query.page, query.limit);
+      const filters = {
+        ...(query.q !== undefined ? { query: query.q } : {}),
+        ...(query.status !== undefined ? { status: query.status } : {}),
+        ...(query.parentId !== undefined ? { parentId: query.parentId } : {}),
+        ...(query.rootOnly !== undefined ? { rootOnly: query.rootOnly } : {}),
+      };
+
+      return paginateAdminList({
+        query,
+        listOffset: ({ limit, offset }) =>
+          catalogRepo.listAdminOffset({ limit, offset, ...filters }),
+        listCursor: ({ limit, cursor }) =>
+          catalogRepo.listAdminCursor({
+            limit,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...filters,
+          }),
+        serialize: serializeCategory,
+      });
+    },
+
+    async getAdminCategoryById(actor: AuthUser, id: string): Promise<CategoryDetail> {
+      assertAdminUser(actor);
+
+      const category = await catalogRepo.findById(id);
+      if (category === null) {
+        throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
 
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
-      const rows = await catalogRepo.listAdminCursor({
-        limit: query.limit + 1,
-        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
-        ...(query.q !== undefined ? { query: query.q } : {}),
-      });
+      const [parentRow, childRows] = await Promise.all([
+        category.parentId !== null
+          ? catalogRepo.findById(category.parentId)
+          : Promise.resolve(null),
+        category.parentId === null
+          ? catalogRepo.listActiveChildren(category.id)
+          : Promise.resolve([]),
+      ]);
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
+      const effectiveSpecSchema = mergeEffectiveSpecSchema(
+        parentRow?.specSchema ?? [],
+        category.specSchema,
+      );
 
       return {
-        data: pageItems.map(serializeCategory),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
+        ...serializeCategory(category),
+        parent:
+          parentRow !== null
+            ? { id: parentRow.id, name: parentRow.name, slug: parentRow.slug }
+            : null,
+        subCategories: childRows.map(serializeCategory),
+        effectiveSpecSchema,
       };
     },
 
@@ -283,6 +313,7 @@ export function createCatalogService(
       assertAdminUser(actor);
       await validateParentAssignment(input.parentId);
 
+      const resolvedActive = resolveActiveStateInput(input) ?? true;
       const resolvedSlug = input.slug ?? slugify(input.name, 140);
       const created = await catalogRepo.create({
         id: generateId(),
@@ -300,7 +331,8 @@ export function createCatalogService(
         bannerImageUrl: input.bannerImageUrl ?? null,
         specSchema: input.specSchema,
         sortOrder: input.sortOrder,
-        isActive: input.isActive,
+        isActive: resolvedActive,
+        deletedAt: resolvedActive ? null : new Date(),
       });
 
       revalidator.notify(['categories', `category:${created.slug}`, 'sitemap']);
@@ -323,6 +355,34 @@ export function createCatalogService(
         await validateParentAssignment(input.parentId, id);
       }
 
+      const nextActive = resolveActiveStateInput(input);
+      if (nextActive === false) {
+        const [hasChildren, hasProducts] = await Promise.all([
+          catalogRepo.hasNonDeletedChildren(id),
+          catalogRepo.hasNonDeletedProducts(id),
+        ]);
+        if (hasChildren) {
+          throw new ConflictError(
+            'Cannot deactivate a category that still has active subcategories',
+            'CATEGORY_HAS_CHILDREN',
+          );
+        }
+        if (hasProducts) {
+          throw new ConflictError(
+            'Cannot deactivate a category that still has active assigned products',
+            'CATEGORY_HAS_PRODUCTS',
+          );
+        }
+      }
+
+      const activePatch =
+        nextActive !== undefined
+          ? {
+              isActive: nextActive,
+              deletedAt: nextActive ? null : (existing.deletedAt ?? new Date()),
+            }
+          : {};
+
       const updated = await catalogRepo.updateById(id, {
         ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
         ...(input.name !== undefined ? { name: input.name } : {}),
@@ -338,7 +398,7 @@ export function createCatalogService(
         ...(input.bannerImageUrl !== undefined ? { bannerImageUrl: input.bannerImageUrl } : {}),
         ...(input.specSchema !== undefined ? { specSchema: input.specSchema } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+        ...activePatch,
       });
 
       if (updated === null) {
@@ -380,7 +440,7 @@ export function createCatalogService(
         );
       }
 
-      await catalogRepo.softDeleteById(id, new Date());
+      await catalogRepo.softDeleteById(id, existing.deletedAt ?? new Date());
       revalidator.notify(['categories', `category:${existing.slug}`, 'sitemap']);
     },
   };

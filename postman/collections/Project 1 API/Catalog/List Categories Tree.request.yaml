@@ -6,6 +6,14 @@ queryParams:
   - key: tree
     value: 'true'
     description: Nest subcategories under root categories
+  - key: parentId
+    value: '{{categoryId}}'
+    disabled: true
+    description: Optional parent category UUID filter
+  - key: rootOnly
+    value: 'true'
+    disabled: true
+    description: Optional root filter (true = top-level only, false = subcategories only)
   - key: q
     value: perkins
     disabled: true

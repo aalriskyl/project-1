@@ -1,16 +1,23 @@
 import { env } from '@/config/env.ts';
 import { generateOpaqueToken, hashTokenSha256 } from '@/lib/crypto.ts';
-import { ConflictError, ServiceUnavailableError, UnauthorizedError } from '@/lib/errors.ts';
-import type { AuthUser } from '@/types/app.ts';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ServiceUnavailableError,
+  UnauthorizedError,
+} from '@/lib/errors.ts';
 import { type GoogleTokenVerifier, googleTokenVerifier } from '@/lib/google-oauth.ts';
 import { generateId } from '@/lib/id.ts';
 import { type JwtConfig, signAccessToken } from '@/lib/jwt.ts';
-import { type MailProvider } from '@/lib/mailer.ts';
 import { encryptMail } from '@/lib/mail-outbox-crypto.ts';
+import { type MailProvider } from '@/lib/mailer.ts';
 import { hashPassword, verifyAgainstDummyPassword, verifyPassword } from '@/lib/password.ts';
+import { isRecordActive } from '@/lib/status.ts';
 import type { AuthRepository, NewRefreshTokenInput } from '@/modules/auth/auth.repository.ts';
 import type {
   AuthSession,
+  ChangePasswordBody,
   ForgotPasswordBody,
   GoogleLoginBody,
   LoginBody,
@@ -21,6 +28,7 @@ import type {
 } from '@/modules/auth/auth.schema.ts';
 import type { UserEntity } from '@/modules/users/users.repository.ts';
 import { serializeUser } from '@/modules/users/users.service.ts';
+import type { AuthUser } from '@/types/app.ts';
 
 const GENERIC_FORGOT_PASSWORD_MESSAGE =
   'If an account exists for that email, a password reset link has been sent.';
@@ -41,6 +49,7 @@ export interface AuthService {
   linkGoogle(actor: AuthUser, input: GoogleLoginBody): Promise<AuthSession>;
   forgotPassword(input: ForgotPasswordBody): Promise<{ readonly message: string }>;
   resetPassword(input: ResetPasswordBody): Promise<void>;
+  changePassword(actor: AuthUser, input: ChangePasswordBody): Promise<void>;
   refresh(input: RefreshBody): Promise<AuthSession>;
   logout(input: LogoutBody): Promise<void>;
 }
@@ -111,6 +120,7 @@ export function createAuthService(
         );
       }
 
+      const resolvedName = input.name ?? input.displayName ?? input.email;
       const passwordHash = await hashPassword(input.password);
       const userId = generateId();
       const familyId = generateId();
@@ -126,7 +136,8 @@ export function createAuthService(
           email: input.email,
           passwordHash,
           phone: input.phone ?? null,
-          displayName: input.displayName,
+          address: input.address ?? null,
+          displayName: resolvedName,
           role: 'user',
         },
         refreshToken: record,
@@ -147,6 +158,10 @@ export function createAuthService(
         throw new UnauthorizedError('Invalid email or password', 'INVALID_CREDENTIALS');
       }
 
+      if (!isRecordActive(existing)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
+
       const familyId = generateId();
       const { rawRefreshToken, record } = buildRefreshTokenCandidate(
         existing.id,
@@ -164,6 +179,9 @@ export function createAuthService(
 
       const existingBySub = await authRepo.findUserByGoogleSub(identity.sub);
       if (existingBySub !== null) {
+        if (!isRecordActive(existingBySub)) {
+          throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+        }
         const familyId = generateId();
         const { rawRefreshToken, record } = buildRefreshTokenCandidate(
           existingBySub.id,
@@ -176,6 +194,9 @@ export function createAuthService(
 
       const existingByEmail = await authRepo.findUserByEmailWithCredentials(identity.email);
       if (existingByEmail !== null) {
+        if (!isRecordActive(existingByEmail)) {
+          throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+        }
         throw new ConflictError(
           'Sign in to your existing account before linking Google',
           'GOOGLE_LINK_REQUIRED',
@@ -214,6 +235,9 @@ export function createAuthService(
           'GOOGLE_ACCOUNT_MISMATCH',
         );
       }
+      if (!isRecordActive(existing)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
       const { rawRefreshToken, record } = buildRefreshTokenCandidate(
         actor.id,
         generateId(),
@@ -237,7 +261,7 @@ export function createAuthService(
           'MAIL_NOT_CONFIGURED',
         );
       const existing = await authRepo.findUserByEmailWithCredentials(input.email);
-      if (existing === null) {
+      if (existing === null || !isRecordActive(existing)) {
         return { message: GENERIC_FORGOT_PASSWORD_MESSAGE };
       }
 
@@ -289,6 +313,37 @@ export function createAuthService(
       }
     },
 
+    async changePassword(actor: AuthUser, input: ChangePasswordBody): Promise<void> {
+      const existing = await authRepo.findUserByIdWithCredentials(actor.id);
+      if (existing === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
+      if (!isRecordActive(existing)) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
+      if (existing.passwordHash === null) {
+        throw new ConflictError(
+          'This account uses Google Sign-In and has no local password set',
+          'PASSWORD_NOT_SET',
+        );
+      }
+
+      const validCurrent = await verifyPassword(input.currentPassword, existing.passwordHash);
+      if (!validCurrent) {
+        throw new UnauthorizedError('Current password is incorrect', 'INVALID_CREDENTIALS');
+      }
+
+      const nextHash = await hashPassword(input.newPassword);
+      const updated = await authRepo.updatePasswordAndRevokeSessions({
+        userId: actor.id,
+        passwordHash: nextHash,
+        now: new Date(),
+      });
+      if (!updated) {
+        throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
+    },
+
     async refresh(input: RefreshBody): Promise<AuthSession> {
       const tokenHash = hashTokenSha256(input.refreshToken);
       const found = await authRepo.findRefreshTokenWithUserByHash(tokenHash);
@@ -298,6 +353,11 @@ export function createAuthService(
       }
 
       const now = new Date();
+
+      if (!isRecordActive(found.user)) {
+        await authRepo.revokeTokenFamily(found.token.familyId, now);
+        throw new UnauthorizedError('Account has been deactivated', 'ACCOUNT_INACTIVE');
+      }
 
       if (found.token.revokedAt !== null) {
         if (found.token.replacedByTokenId !== null) {

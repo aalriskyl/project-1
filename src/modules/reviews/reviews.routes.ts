@@ -14,6 +14,7 @@ import {
   ProductReviewCursorPageSchema,
   ProductReviewEnvelopeSchema,
   ReviewIdParamSchema,
+  UpdateOwnReviewBodySchema,
 } from '@/modules/reviews/reviews.schema.ts';
 import type { ReviewsService } from '@/modules/reviews/reviews.service.ts';
 import type { AppEnv } from '@/types/app.ts';
@@ -95,6 +96,73 @@ export function createProductReviewsRoutes(
     },
   });
 
+  const updateOwnReviewRoute = createRoute({
+    method: 'patch',
+    path: '/{id}/reviews/me',
+    tags: ['Reviews'],
+    summary: 'Update Own Product Review',
+    description:
+      'Edit the authenticated user’s active review (rating or comment) for a product and recalculate its rating rollup.',
+    security: [{ BearerAuth: [] }],
+    middleware: [authMiddleware] as const,
+    request: {
+      params: ProductIdParamSchema,
+      body: {
+        required: true,
+        content: { 'application/json': { schema: UpdateOwnReviewBodySchema } },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Review updated',
+        content: { 'application/json': { schema: ProductReviewEnvelopeSchema } },
+      },
+      401: {
+        description: 'Unauthorized',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Product or active review not found',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      422: {
+        description: 'Validation failed',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  const deleteOwnReviewRoute = createRoute({
+    method: 'delete',
+    path: '/{id}/reviews/me',
+    tags: ['Reviews'],
+    summary: 'Delete Own Product Review',
+    description:
+      'Soft-delete the authenticated user’s active review for a product (`status = "inactive"`) and recalculate its rating rollup.',
+    security: [{ BearerAuth: [] }],
+    middleware: [authMiddleware] as const,
+    request: {
+      params: ProductIdParamSchema,
+    },
+    responses: {
+      204: {
+        description: 'Review soft-deleted',
+      },
+      401: {
+        description: 'Unauthorized',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Product or active review not found',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      422: {
+        description: 'Invalid product ID',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
   return router
     .openapi(listProductReviewsRoute, async (c) => {
       const { id } = c.req.valid('param');
@@ -108,6 +176,19 @@ export function createProductReviewsRoutes(
       const body = c.req.valid('json');
       const data = await reviewsService.createProductReview(actor, id, body);
       return c.json(ok(data, 'Product review submitted successfully'), 201);
+    })
+    .openapi(updateOwnReviewRoute, async (c) => {
+      const actor = getRequiredUser(c);
+      const { id } = c.req.valid('param');
+      const body = c.req.valid('json');
+      const data = await reviewsService.updateOwnProductReview(actor, id, body);
+      return c.json(ok(data, 'Product review updated successfully'), 200);
+    })
+    .openapi(deleteOwnReviewRoute, async (c) => {
+      const actor = getRequiredUser(c);
+      const { id } = c.req.valid('param');
+      await reviewsService.deleteOwnProductReview(actor, id);
+      return c.body(null, 204);
     });
 }
 
@@ -117,7 +198,7 @@ const listAdminReviewsRoute = createRoute({
   tags: ['Admin - Reviews'],
   summary: 'Admin: List Reviews',
   description:
-    'List all product reviews (published and unpublished) with cursor or optional numbered `?page=` pagination and filters.',
+    'List all product reviews (active/inactive, published/unpublished) with cursor or optional numbered `?page=` pagination and `?status=active|inactive` filter.',
   security: [{ BearerAuth: [] }],
   request: {
     query: ListAdminReviewsQuerySchema,
@@ -147,7 +228,8 @@ const moderateReviewRoute = createRoute({
   path: '/{id}',
   tags: ['Admin - Reviews'],
   summary: 'Admin: Moderate Review',
-  description: 'Publish or unpublish a product review and recalculate the product rating.',
+  description:
+    'Publish/unpublish or activate/deactivate (restore) a product review and recalculate the product rating.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ReviewIdParamSchema,
@@ -181,7 +263,8 @@ const deleteReviewRoute = createRoute({
   path: '/{id}',
   tags: ['Admin - Reviews'],
   summary: 'Admin: Delete Review',
-  description: 'Delete a product review and recalculate the product rating.',
+  description:
+    'Soft-delete a product review (`status = "inactive"`, `deletedAt = now()`) and recalculate the product rating. Restorable via `PATCH /v1/admin/reviews/{id}`.',
   security: [{ BearerAuth: [] }],
   request: {
     params: ReviewIdParamSchema,

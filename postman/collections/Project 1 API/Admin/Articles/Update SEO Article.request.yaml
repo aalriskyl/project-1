@@ -15,7 +15,8 @@ body:
     {
       "isPublished": true,
       "focusKeyword": "genset silent 30 kva",
-      "noIndex": false
+      "noIndex": false,
+      "status": "active"
     }
 scripts:
   - type: afterResponse

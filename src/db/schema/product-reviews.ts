@@ -31,8 +31,10 @@ export const productReviews = pgTable(
     rating: smallint('rating').notNull(),
     comment: text('comment'),
     isPublished: boolean('is_published').notNull().default(true),
+    isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
   },
   (table) => [
     check('product_reviews_rating_range_chk', sql`${table.rating} >= 1 and ${table.rating} <= 5`),

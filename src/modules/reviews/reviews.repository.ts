@@ -1,14 +1,27 @@
-import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
-import postgres from 'postgres';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { productReviews } from '@/db/schema/product-reviews.ts';
 import { products } from '@/db/schema/products.ts';
 import { users } from '@/db/schema/users.ts';
+import {
+  activeRecordConditions,
+  buildDateRangeConditions,
+  buildDescCursorCondition,
+  buildStatusFilterConditions,
+  isUniqueViolation,
+} from '@/lib/db-helpers.ts';
 import { ConflictError } from '@/lib/errors.ts';
-import type { DecodedCursor } from '@/lib/pagination.ts';
+import { buildFuzzySearchCondition } from '@/lib/search.ts';
+import type {
+  AdminDateListFilter,
+  CursorListParams,
+  OffsetListParams,
+  OffsetListResult,
+  SoftDeletableEntity,
+  SoftDeletePatch,
+} from '@/types/common.ts';
 
-export interface ProductReviewWithAuthorRow {
-  readonly id: string;
+export interface ProductReviewWithAuthorRow extends SoftDeletableEntity {
   readonly productId: string;
   readonly userId: string;
   readonly authorName: string;
@@ -16,8 +29,6 @@ export interface ProductReviewWithAuthorRow {
   readonly rating: number;
   readonly comment: string | null;
   readonly isPublished: boolean;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
 }
 
 export interface CreateReviewRecord {
@@ -29,51 +40,51 @@ export interface CreateReviewRecord {
   readonly comment: string | null;
 }
 
-export interface AdminReviewsFilter {
+export interface AdminReviewsFilter extends AdminDateListFilter {
   readonly productId?: string;
+  readonly userId?: string;
   readonly isPublished?: boolean;
   readonly rating?: number;
 }
 
+export interface UpdateReviewModerationPatch extends SoftDeletePatch {
+  readonly isPublished?: boolean;
+}
+
 export interface ReviewsRepository {
-  listPublishedByProductCursor(params: {
-    readonly productId: string;
-    readonly limit: number;
-    readonly cursor?: DecodedCursor;
-  }): Promise<readonly ProductReviewWithAuthorRow[]>;
-  listAdminCursor(params: {
-    readonly limit: number;
-    readonly cursor?: DecodedCursor;
-    readonly productId?: string;
-    readonly isPublished?: boolean;
-    readonly rating?: number;
-  }): Promise<readonly ProductReviewWithAuthorRow[]>;
-  listAdminOffset(params: {
-    readonly limit: number;
-    readonly offset: number;
-    readonly productId?: string;
-    readonly isPublished?: boolean;
-    readonly rating?: number;
-  }): Promise<{ readonly items: readonly ProductReviewWithAuthorRow[]; readonly total: number }>;
+  listPublishedByProductCursor(
+    params: CursorListParams & {
+      readonly productId: string;
+      readonly rating?: number;
+    },
+  ): Promise<readonly ProductReviewWithAuthorRow[]>;
+  listAdminCursor(
+    params: AdminReviewsFilter & CursorListParams,
+  ): Promise<readonly ProductReviewWithAuthorRow[]>;
+  listAdminOffset(
+    params: AdminReviewsFilter & OffsetListParams,
+  ): Promise<OffsetListResult<ProductReviewWithAuthorRow>>;
   createAndSyncProductRating(input: CreateReviewRecord): Promise<ProductReviewWithAuthorRow>;
+  updateOwnReviewAndSyncRating(params: {
+    readonly productId: string;
+    readonly userId: string;
+    readonly rating?: number;
+    readonly comment?: string | null;
+  }): Promise<ProductReviewWithAuthorRow | null>;
+  softDeleteOwnReviewAndSyncRating(params: {
+    readonly productId: string;
+    readonly userId: string;
+  }): Promise<boolean>;
   updatePublishStateAndSyncRating(
     reviewId: string,
-    isPublished: boolean,
+    patchOrIsPublished: boolean | UpdateReviewModerationPatch,
   ): Promise<ProductReviewWithAuthorRow | null>;
   deleteAndSyncRating(reviewId: string): Promise<{ readonly productId: string } | null>;
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  if (err instanceof postgres.PostgresError && err.code === '23505') {
-    return true;
-  }
-  if (typeof err === 'object' && err !== null && 'cause' in err) {
-    return isUniqueViolation(err.cause);
-  }
-  return false;
-}
-
 export function createReviewsRepository(db: Database): ReviewsRepository {
+  const reviewSearchTarget = sql`(coalesce(${productReviews.comment}, '') || ' ' || ${users.displayName})`;
+
   const selectShape = {
     id: productReviews.id,
     productId: productReviews.productId,
@@ -83,8 +94,10 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
     rating: productReviews.rating,
     comment: productReviews.comment,
     isPublished: productReviews.isPublished,
+    isActive: productReviews.isActive,
     createdAt: productReviews.createdAt,
     updatedAt: productReviews.updatedAt,
+    deletedAt: productReviews.deletedAt,
   };
 
   async function recomputeProductRatingTx(
@@ -97,7 +110,13 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         totalCount: sql<number>`count(*)::int`,
       })
       .from(productReviews)
-      .where(and(eq(productReviews.productId, productId), eq(productReviews.isPublished, true)));
+      .where(
+        and(
+          eq(productReviews.productId, productId),
+          eq(productReviews.isPublished, true),
+          ...activeRecordConditions(productReviews),
+        ),
+      );
 
     await tx
       .update(products)
@@ -109,25 +128,58 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
       .where(eq(products.id, productId));
   }
 
+  function buildAdminFilterConditions(filter: AdminReviewsFilter) {
+    const conditions = [
+      ...buildStatusFilterConditions(productReviews, filter.status),
+      ...buildDateRangeConditions(productReviews.createdAt, filter),
+    ];
+    if (filter.productId !== undefined) {
+      conditions.push(eq(productReviews.productId, filter.productId));
+    }
+    if (filter.userId !== undefined) {
+      conditions.push(eq(productReviews.userId, filter.userId));
+    }
+    if (filter.isPublished !== undefined) {
+      conditions.push(eq(productReviews.isPublished, filter.isPublished));
+    }
+    if (filter.rating !== undefined) {
+      conditions.push(eq(productReviews.rating, filter.rating));
+    }
+    if (filter.query !== undefined) {
+      conditions.push(
+        buildFuzzySearchCondition({
+          targetSql: reviewSearchTarget,
+          query: filter.query,
+        }),
+      );
+    }
+    return conditions;
+  }
+
   return {
     async listPublishedByProductCursor({
       productId,
       limit,
       cursor,
+      rating,
     }): Promise<readonly ProductReviewWithAuthorRow[]> {
       const conditions = [
         eq(productReviews.productId, productId),
         eq(productReviews.isPublished, true),
+        ...activeRecordConditions(productReviews),
       ];
 
-      if (cursor !== undefined) {
-        const cursorCond = or(
-          lt(productReviews.createdAt, cursor.createdAt),
-          and(eq(productReviews.createdAt, cursor.createdAt), lt(productReviews.id, cursor.id)),
-        );
-        if (cursorCond !== undefined) {
-          conditions.push(cursorCond);
-        }
+      if (rating !== undefined) {
+        conditions.push(eq(productReviews.rating, rating));
+      }
+
+      const cursorCond = buildDescCursorCondition(
+        productReviews.createdAt,
+        productReviews.id,
+        cursor,
+      );
+      if (cursorCond !== undefined) {
+        conditions.push(cursorCond);
       }
 
       return db
@@ -143,27 +195,31 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
       limit,
       cursor,
       productId,
+      userId,
       isPublished,
       rating,
+      query,
+      status,
+      createdFrom,
+      createdTo,
     }): Promise<readonly ProductReviewWithAuthorRow[]> {
-      const conditions = [];
-      if (productId !== undefined) {
-        conditions.push(eq(productReviews.productId, productId));
-      }
-      if (isPublished !== undefined) {
-        conditions.push(eq(productReviews.isPublished, isPublished));
-      }
-      if (rating !== undefined) {
-        conditions.push(eq(productReviews.rating, rating));
-      }
-      if (cursor !== undefined) {
-        const cursorCond = or(
-          lt(productReviews.createdAt, cursor.createdAt),
-          and(eq(productReviews.createdAt, cursor.createdAt), lt(productReviews.id, cursor.id)),
-        );
-        if (cursorCond !== undefined) {
-          conditions.push(cursorCond);
-        }
+      const conditions = buildAdminFilterConditions({
+        ...(productId !== undefined ? { productId } : {}),
+        ...(userId !== undefined ? { userId } : {}),
+        ...(isPublished !== undefined ? { isPublished } : {}),
+        ...(rating !== undefined ? { rating } : {}),
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(createdFrom !== undefined ? { createdFrom } : {}),
+        ...(createdTo !== undefined ? { createdTo } : {}),
+      });
+      const cursorCond = buildDescCursorCondition(
+        productReviews.createdAt,
+        productReviews.id,
+        cursor,
+      );
+      if (cursorCond !== undefined) {
+        conditions.push(cursorCond);
       }
 
       return db
@@ -175,17 +231,28 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         .limit(limit);
     },
 
-    async listAdminOffset({ limit, offset, productId, isPublished, rating }) {
-      const conditions = [];
-      if (productId !== undefined) {
-        conditions.push(eq(productReviews.productId, productId));
-      }
-      if (isPublished !== undefined) {
-        conditions.push(eq(productReviews.isPublished, isPublished));
-      }
-      if (rating !== undefined) {
-        conditions.push(eq(productReviews.rating, rating));
-      }
+    async listAdminOffset({
+      limit,
+      offset,
+      productId,
+      userId,
+      isPublished,
+      rating,
+      query,
+      status,
+      createdFrom,
+      createdTo,
+    }) {
+      const conditions = buildAdminFilterConditions({
+        ...(productId !== undefined ? { productId } : {}),
+        ...(userId !== undefined ? { userId } : {}),
+        ...(isPublished !== undefined ? { isPublished } : {}),
+        ...(rating !== undefined ? { rating } : {}),
+        ...(query !== undefined ? { query } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(createdFrom !== undefined ? { createdFrom } : {}),
+        ...(createdTo !== undefined ? { createdTo } : {}),
+      });
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
       const [items, countRows] = await Promise.all([
@@ -200,6 +267,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
         db
           .select({ total: sql<number>`count(*)::int` })
           .from(productReviews)
+          .innerJoin(users, eq(productReviews.userId, users.id))
           .where(whereClause),
       ]);
 
@@ -224,6 +292,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
             rating: input.rating,
             comment: input.comment,
             isPublished: true,
+            isActive: true,
           });
 
           await recomputeProductRatingTx(tx, input.productId);
@@ -251,13 +320,101 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
       }
     },
 
+    async updateOwnReviewAndSyncRating({
+      productId,
+      userId,
+      rating,
+      comment,
+    }): Promise<ProductReviewWithAuthorRow | null> {
+      return db.transaction(async (tx) => {
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, productId))
+          .for('update');
+
+        const [updated] = await tx
+          .update(productReviews)
+          .set({
+            ...(rating !== undefined ? { rating } : {}),
+            ...(comment !== undefined ? { comment } : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(productReviews.productId, productId),
+              eq(productReviews.userId, userId),
+              eq(productReviews.isActive, true),
+              isNull(productReviews.deletedAt),
+            ),
+          )
+          .returning({ id: productReviews.id });
+
+        if (updated === undefined) {
+          return null;
+        }
+
+        await recomputeProductRatingTx(tx, productId);
+
+        const [withAuthor] = await tx
+          .select(selectShape)
+          .from(productReviews)
+          .innerJoin(users, eq(productReviews.userId, users.id))
+          .where(eq(productReviews.id, updated.id))
+          .limit(1);
+
+        return withAuthor ?? null;
+      });
+    },
+
+    async softDeleteOwnReviewAndSyncRating({ productId, userId }): Promise<boolean> {
+      return db.transaction(async (tx) => {
+        await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.id, productId))
+          .for('update');
+
+        const now = new Date();
+        const [softDeleted] = await tx
+          .update(productReviews)
+          .set({
+            isActive: false,
+            isPublished: false,
+            deletedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(productReviews.productId, productId),
+              eq(productReviews.userId, userId),
+              eq(productReviews.isActive, true),
+              isNull(productReviews.deletedAt),
+            ),
+          )
+          .returning({ id: productReviews.id });
+
+        if (softDeleted === undefined) {
+          return false;
+        }
+
+        await recomputeProductRatingTx(tx, productId);
+        return true;
+      });
+    },
+
     async updatePublishStateAndSyncRating(
       reviewId: string,
-      isPublished: boolean,
+      patchOrIsPublished: boolean | UpdateReviewModerationPatch,
     ): Promise<ProductReviewWithAuthorRow | null> {
+      const patch: UpdateReviewModerationPatch =
+        typeof patchOrIsPublished === 'boolean'
+          ? { isPublished: patchOrIsPublished }
+          : patchOrIsPublished;
+
       return db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ productId: productReviews.productId })
+          .select({ productId: productReviews.productId, deletedAt: productReviews.deletedAt })
           .from(productReviews)
           .where(eq(productReviews.id, reviewId));
         if (target === undefined) return null;
@@ -266,9 +423,32 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .from(products)
           .where(eq(products.id, target.productId))
           .for('update');
+
+        const now = new Date();
+        const setPayload: {
+          isPublished?: boolean;
+          isActive?: boolean;
+          deletedAt?: Date | null;
+          updatedAt: Date;
+        } = {
+          updatedAt: now,
+          ...(patch.isPublished !== undefined ? { isPublished: patch.isPublished } : {}),
+          ...(patch.isActive !== undefined
+            ? {
+                isActive: patch.isActive,
+                deletedAt:
+                  patch.deletedAt !== undefined
+                    ? patch.deletedAt
+                    : patch.isActive
+                      ? null
+                      : (target.deletedAt ?? now),
+              }
+            : {}),
+        };
+
         const [updated] = await tx
           .update(productReviews)
-          .set({ isPublished, updatedAt: new Date() })
+          .set(setPayload)
           .where(eq(productReviews.id, reviewId))
           .returning({ id: productReviews.id, productId: productReviews.productId });
 
@@ -292,7 +472,7 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
     async deleteAndSyncRating(reviewId: string): Promise<{ readonly productId: string } | null> {
       return db.transaction(async (tx) => {
         const [target] = await tx
-          .select({ productId: productReviews.productId })
+          .select({ productId: productReviews.productId, deletedAt: productReviews.deletedAt })
           .from(productReviews)
           .where(eq(productReviews.id, reviewId));
         if (target === undefined) return null;
@@ -301,17 +481,25 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .from(products)
           .where(eq(products.id, target.productId))
           .for('update');
-        const [deleted] = await tx
-          .delete(productReviews)
+
+        const now = new Date();
+        const [softDeleted] = await tx
+          .update(productReviews)
+          .set({
+            isActive: false,
+            isPublished: false,
+            deletedAt: target.deletedAt ?? now,
+            updatedAt: now,
+          })
           .where(eq(productReviews.id, reviewId))
           .returning({ productId: productReviews.productId });
 
-        if (deleted === undefined) {
+        if (softDeleted === undefined) {
           return null;
         }
 
-        await recomputeProductRatingTx(tx, deleted.productId);
-        return deleted;
+        await recomputeProductRatingTx(tx, softDeleted.productId);
+        return softDeleted;
       });
     },
   };

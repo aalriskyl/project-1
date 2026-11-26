@@ -159,6 +159,51 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
     expect(fuzzyArticlePage.data).toHaveLength(1);
     expect(fuzzyArticlePage.data[0]?.slug).toBe('mesin-potong-aspal-fungsi-dan-spesifikasi');
 
+    // Public ?productId= filters published articles linked to that product
+    const linkedProductId = draft.data.relatedProductIds[0] ?? '';
+    const byProductRes = await testApp.request(`/v1/articles?productId=${linkedProductId}`);
+    expect(byProductRes.status).toBe(200);
+    const byProductPage = ArticleCursorPageSchema.parse(await byProductRes.json());
+    expect(byProductPage.data).toHaveLength(1);
+    expect(byProductPage.data[0]?.id).toBe(draft.data.id);
+
+    // Admin ?isPublished=false returns only drafts, ?isPublished=true returns published
+    const adminDraftOnly = ArticleCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/articles?isPublished=false', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminDraftOnly.data).toHaveLength(0);
+
+    const adminPubByProduct = ArticleCursorPageSchema.parse(
+      await (
+        await testApp.request(`/v1/admin/articles?isPublished=true&productId=${linkedProductId}`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(adminPubByProduct.data).toHaveLength(1);
+    expect(adminPubByProduct.data[0]?.id).toBe(draft.data.id);
+
+    expect(
+      (
+        await testApp.request('/v1/admin/articles?createdFrom=2030-05-01&createdTo=2030-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).status,
+    ).toBe(422);
+
+    const futureArticles = ArticleCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/articles?createdFrom=2099-01-01', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(futureArticles.data).toHaveLength(0);
+
     const page1Res = await testApp.request('/v1/articles?limit=1');
     const page1 = ArticleCursorPageSchema.parse(await page1Res.json());
     expect(page1.data).toHaveLength(1);
@@ -214,7 +259,7 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
     expect(sitemap.data.articles).toHaveLength(2);
     expect(sitemap.data.articles.some((a) => a.slug === 'hidden-promo-page')).toBe(false);
 
-    // 6. Soft-delete removes article from public view
+    // 6. Soft-delete marks article inactive (hidden from public, filterable in admin, restorable via PATCH)
     const delRes = await testApp.request(`/v1/admin/articles/${draft.data.id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -223,5 +268,28 @@ describe('Articles HTTP routes (/v1/articles, /v1/admin/articles)', () => {
 
     const afterDelRes = await testApp.request(`/v1/articles/${draft.data.slug}`);
     expect(afterDelRes.status).toBe(404);
+
+    const inactiveArticles = ArticleCursorPageSchema.parse(
+      await (
+        await testApp.request('/v1/admin/articles?status=inactive', {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        })
+      ).json(),
+    );
+    expect(inactiveArticles.data).toHaveLength(1);
+    expect(inactiveArticles.data[0]?.id).toBe(draft.data.id);
+    expect(inactiveArticles.data[0]?.status).toBe('inactive');
+    expect(inactiveArticles.data[0]?.deletedAt).not.toBeNull();
+
+    const restoreArticleRes = await testApp.request(`/v1/admin/articles/${draft.data.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    expect(restoreArticleRes.status).toBe(200);
+    const restoredArticle = ArticleDetailEnvelopeSchema.parse(await restoreArticleRes.json()).data;
+    expect(restoredArticle.status).toBe('active');
+    expect(restoredArticle.deletedAt).toBeNull();
+    expect((await testApp.request(`/v1/articles/${draft.data.slug}`)).status).toBe(200);
   });
 });

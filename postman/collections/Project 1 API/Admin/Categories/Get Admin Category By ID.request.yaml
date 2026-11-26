@@ -1,0 +1,22 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/admin/categories/:id'
+order: 1600
+pathVariables:
+  - key: id
+    value: '{{categoryId}}'
+    description: Category UUIDv7 (active or inactive)
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns category detail with status and effectiveSpecSchema', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.id).to.be.a('string');
+        pm.expect(['active', 'inactive']).to.include(json.data.status);
+        pm.expect(json.data.effectiveSpecSchema).to.be.an('array');
+      });

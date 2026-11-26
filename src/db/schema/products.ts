@@ -36,6 +36,12 @@ export interface ProductMediaItemRow {
 export type ProductSpecValue = string | number | boolean;
 export type ProductSpecsMap = Record<string, ProductSpecValue>;
 
+export interface ProductCustomSpecRow {
+  readonly label: string;
+  readonly value: string;
+  readonly unit?: string;
+}
+
 /**
  * Industrial equipment & spare-parts catalog (`public.products`).
  * - Stores bounded `media` JSONB + `specs` JSONB (GIN `jsonb_path_ops`) and denormalized
@@ -70,6 +76,7 @@ export const products = pgTable(
     primaryImageUrl: text('primary_image_url'),
     media: jsonb('media').$type<ProductMediaItemRow[]>().notNull().default([]),
     specs: jsonb('specs').$type<ProductSpecsMap>().notNull().default({}),
+    customSpecs: jsonb('custom_specs').$type<ProductCustomSpecRow[]>().notNull().default([]),
     lengthCm: numeric('length_cm', { precision: 10, scale: 2 }),
     widthCm: numeric('width_cm', { precision: 10, scale: 2 }),
     heightCm: numeric('height_cm', { precision: 10, scale: 2 }),

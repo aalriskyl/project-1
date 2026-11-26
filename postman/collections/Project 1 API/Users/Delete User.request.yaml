@@ -1,0 +1,16 @@
+$kind: http-request
+name: 'Delete User (Admin)'
+method: DELETE
+url: '{{baseUrl}}/v1/users/:id'
+order: 6000
+pathVariables:
+  - key: id
+    value: '{{userId}}'
+    description: Target user UUIDv7 (cannot delete own account)
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 204 No Content', () => {
+        pm.response.to.have.status(204);
+      });

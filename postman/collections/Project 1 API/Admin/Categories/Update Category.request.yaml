@@ -15,7 +15,8 @@ body:
     {
       "metaTitle": "Jual Genset Silent 10-500 kVA Resmi | Tsuzumi Japan",
       "focusKeyword": "genset silent",
-      "noIndex": false
+      "noIndex": false,
+      "status": "active"
     }
 scripts:
   - type: afterResponse

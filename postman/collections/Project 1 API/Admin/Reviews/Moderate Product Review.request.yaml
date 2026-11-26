@@ -13,7 +13,8 @@ body:
   type: json
   content: |-
     {
-      "isPublished": true
+      "isPublished": true,
+      "status": "active"
     }
 scripts:
   - type: afterResponse

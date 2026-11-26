@@ -5,7 +5,7 @@ order: 2300
 pathVariables:
   - key: id
     value: '{{articleId}}'
-    description: Article UUIDv7
+    description: Article UUIDv7 (soft-deletes to status=inactive; restorable via PATCH)
 scripts:
   - type: afterResponse
     language: text/javascript

@@ -9,8 +9,9 @@ body:
   type: json
   content: |-
     {
-      "displayName": "Ada Byron",
-      "phone": "+6281234567890"
+      "name": "Ada Byron",
+      "phone": "+6281234567890",
+      "address": "Jl. Industri Raya No. 45, Cikarang, Bekasi"
     }
 scripts:
   - type: afterResponse
@@ -19,7 +20,8 @@ scripts:
       pm.test('Status code is 200 OK', () => {
         pm.response.to.have.status(200);
       });
-      pm.test('Updates displayName', () => {
+      pm.test('Updates name and address', () => {
         const json = pm.response.json();
-        pm.expect(json.data.displayName).to.eql('Ada Byron');
+        pm.expect(json.data.name).to.eql('Ada Byron');
+        pm.expect(json.data.address).to.be.a('string');
       });

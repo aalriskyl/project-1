@@ -5,6 +5,10 @@ order: 5000
 queryParams:
   - key: limit
     value: '10'
+  - key: rating
+    value: '5'
+    disabled: true
+    description: Optional exact star rating filter (1..5)
 pathVariables:
   - key: id
     value: '{{productId}}'

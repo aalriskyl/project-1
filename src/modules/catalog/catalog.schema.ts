@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema, CanonicalUrlSchema } from '@/lib/asset-url.ts';
+import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
 import {
   AdminPaginationQuerySchema,
   createCursorPageSchema,
@@ -7,6 +7,13 @@ import {
 } from '@/lib/pagination.ts';
 import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
 import { SearchQueryParamSchema } from '@/lib/search.ts';
+import {
+  SeoMetadataCreateFields,
+  SeoMetadataResponseFields,
+  SeoMetadataUpdateFields,
+} from '@/lib/seo.ts';
+import { createSlugSchema } from '@/lib/slug.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
 
 export const SpecFieldTypeSchema = z.enum(['number', 'text', 'boolean']);
 
@@ -35,12 +42,7 @@ export const SpecSchemaArraySchema = z
     message: 'specSchema keys must be unique within a category',
   });
 
-const SlugInputSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(140)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase kebab-case');
+const SlugInputSchema = createSlugSchema(140);
 
 export const CategorySchema = z
   .object({
@@ -49,20 +51,19 @@ export const CategorySchema = z
     name: z.string().openapi({ example: 'Genset Silent' }),
     slug: z.string().openapi({ example: 'genset-silent' }),
     description: z.string().nullable().openapi({ example: 'Industrial silent diesel generators' }),
+    ...SeoMetadataResponseFields,
     metaTitle: z
       .string()
       .nullable()
       .openapi({ example: 'Jual Genset Silent 10-500 kVA | Tsuzumi' }),
-    metaDescription: z.string().nullable(),
     focusKeyword: z.string().nullable().openapi({ example: 'genset silent' }),
-    canonicalUrl: z.string().nullable(),
-    noIndex: z.boolean(),
-    ogImageUrl: z.string().nullable(),
     imageUrl: z.string().nullable(),
     bannerImageUrl: z.string().nullable(),
     specSchema: z.array(SpecFieldDefSchema),
     sortOrder: z.number().int(),
     isActive: z.boolean(),
+    status: RecordStatusSchema,
+    deletedAt: z.iso.datetime().nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -92,19 +93,51 @@ export const CategoryDetailSchema = CategorySchema.extend({
 
 export type CategoryDetail = z.infer<typeof CategoryDetailSchema>;
 
-export const ListCategoriesQuerySchema = z.object({
-  tree: QueryBooleanSchema.optional().openapi({
-    param: { name: 'tree', in: 'query' },
-    description: 'When true, nests subcategories inside root categories under `children`',
-    example: 'true',
-  }),
-  q: SearchQueryParamSchema,
-});
+export const ListCategoriesQuerySchema = z
+  .object({
+    tree: QueryBooleanSchema.optional().openapi({
+      param: { name: 'tree', in: 'query' },
+      description: 'When true, nests subcategories inside root categories under `children`',
+      example: 'true',
+    }),
+    parentId: z
+      .uuid()
+      .optional()
+      .openapi({
+        param: { name: 'parentId', in: 'query' },
+        description: 'Filter subcategories belonging to a specific parent category UUID',
+      }),
+    rootOnly: QueryBooleanSchema.optional().openapi({
+      param: { name: 'rootOnly', in: 'query' },
+      description:
+        'When true returns only top-level categories; when false returns only subcategories',
+    }),
+    q: SearchQueryParamSchema,
+  })
+  .refine((q) => !(q.parentId !== undefined && q.rootOnly === true), {
+    path: ['parentId'],
+    message: 'Cannot combine parentId with rootOnly=true',
+  });
 
 export type ListCategoriesQuery = z.infer<typeof ListCategoriesQuerySchema>;
 
 export const ListAdminCategoriesQuerySchema = AdminPaginationQuerySchema.extend({
   q: SearchQueryParamSchema,
+  status: StatusFilterQueryParamSchema,
+  parentId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'parentId', in: 'query' },
+      description: 'Filter subcategories belonging to a specific parent category UUID',
+    }),
+  rootOnly: QueryBooleanSchema.optional().openapi({
+    param: { name: 'rootOnly', in: 'query' },
+    description: 'When true returns only root categories; when false returns only subcategories',
+  }),
+}).refine((q) => !(q.parentId !== undefined && q.rootOnly === true), {
+  path: ['parentId'],
+  message: 'Cannot combine parentId with rootOnly=true',
 });
 
 export type ListAdminCategoriesQuery = z.infer<typeof ListAdminCategoriesQuerySchema>;
@@ -128,17 +161,13 @@ export const CreateCategoryBodySchema = z
     name: z.string().trim().min(1).max(120).openapi({ example: 'Genset Silent' }),
     slug: SlugInputSchema.optional(),
     description: z.string().trim().max(5_000).nullable().optional(),
-    metaTitle: z.string().trim().max(160).nullable().optional(),
-    metaDescription: z.string().trim().max(320).nullable().optional(),
-    focusKeyword: z.string().trim().max(120).nullable().optional(),
-    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
-    noIndex: z.boolean().default(false),
-    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
+    ...SeoMetadataCreateFields,
     imageUrl: AssetImageUrlSchema.nullable().optional(),
     bannerImageUrl: AssetImageUrlSchema.nullable().optional(),
     specSchema: SpecSchemaArraySchema.default([]),
     sortOrder: z.number().int().min(0).max(100_000).default(0),
-    isActive: z.boolean().default(true),
+    isActive: z.boolean().optional(),
+    status: RecordStatusSchema.optional(),
   })
   .openapi('CreateCategoryBody');
 
@@ -150,17 +179,13 @@ export const UpdateCategoryBodySchema = z
     name: z.string().trim().min(1).max(120).optional(),
     slug: SlugInputSchema.optional(),
     description: z.string().trim().max(5_000).nullable().optional(),
-    metaTitle: z.string().trim().max(160).nullable().optional(),
-    metaDescription: z.string().trim().max(320).nullable().optional(),
-    focusKeyword: z.string().trim().max(120).nullable().optional(),
-    canonicalUrl: CanonicalUrlSchema.nullable().optional(),
-    noIndex: z.boolean().optional(),
-    ogImageUrl: AssetImageUrlSchema.nullable().optional(),
+    ...SeoMetadataUpdateFields,
     imageUrl: AssetImageUrlSchema.nullable().optional(),
     bannerImageUrl: AssetImageUrlSchema.nullable().optional(),
     specSchema: SpecSchemaArraySchema.optional(),
     sortOrder: z.number().int().min(0).max(100_000).optional(),
     isActive: z.boolean().optional(),
+    status: RecordStatusSchema.optional(),
   })
   .openapi('UpdateCategoryBody');
 

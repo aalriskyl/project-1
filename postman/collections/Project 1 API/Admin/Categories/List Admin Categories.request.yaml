@@ -13,6 +13,18 @@ queryParams:
     value: perkins
     disabled: true
     description: Optional fuzzy text search query
+  - key: status
+    value: active
+    disabled: true
+    description: Optional lifecycle status filter (active or inactive)
+  - key: parentId
+    value: '{{categoryId}}'
+    disabled: true
+    description: Optional parent category UUID filter
+  - key: rootOnly
+    value: 'true'
+    disabled: true
+    description: Optional root filter (true = top-level only, false = subcategories only)
   - key: cursor
     value: ''
     disabled: true

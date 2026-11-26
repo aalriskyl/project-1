@@ -74,7 +74,7 @@ const listAdminArticlesRoute = createRoute({
   tags: ['Admin - Articles'],
   summary: 'Admin: List Articles',
   description:
-    'List all non-deleted articles (including drafts) with cursor or optional numbered `?page=` pagination, `?tag=`, and `?q=` fuzzy search.',
+    'List articles (active, inactive, and drafts) with cursor or optional numbered `?page=` pagination, `?status=active|inactive`, `?tag=`, and `?q=` fuzzy search.',
   security: [{ BearerAuth: [] }],
   request: {
     query: ListAdminArticlesQuerySchema,

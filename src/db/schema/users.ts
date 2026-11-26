@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   pgTable,
@@ -14,6 +15,7 @@ import {
  * Users table (`public.users`).
  * - Supports both Argon2id email/password accounts and Google OAuth accounts (`google_sub`).
  * - `phone` is stored as a profile/shipping/WhatsApp contact (E.164), not an unverified login key.
+ * - Soft-delete sets `is_active = false` and `deleted_at = now()` while preserving audit & review FKs.
  * - RLS is enabled per Supabase security rules.
  */
 export const users = pgTable(
@@ -24,10 +26,13 @@ export const users = pgTable(
     passwordHash: text('password_hash'),
     googleSub: varchar('google_sub', { length: 128 }),
     phone: varchar('phone', { length: 24 }),
+    address: text('address'),
     displayName: varchar('display_name', { length: 120 }).notNull(),
     role: varchar('role', { length: 32 }).notNull().default('user'),
+    isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true, mode: 'date' }),
   },
   (table) => [
     index('users_created_at_id_idx').on(table.createdAt, table.id),

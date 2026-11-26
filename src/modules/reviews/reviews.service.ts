@@ -1,13 +1,13 @@
 import { NotFoundError, ValidationError } from '@/lib/errors.ts';
 import { generateId } from '@/lib/id.ts';
 import {
-  assertCursorOrPage,
-  buildOffsetPage,
+  buildCursorPage,
   type CursorPage,
   decodeCursor,
-  encodeCursor,
+  paginateAdminList,
 } from '@/lib/pagination.ts';
 import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
 import { assertAdminUser } from '@/middlewares/authorize.ts';
 import type { ProductsRepository } from '@/modules/products/products.repository.ts';
 import type {
@@ -20,6 +20,7 @@ import type {
   ListProductReviewsQuery,
   ModerateReviewBody,
   PublicProductReview,
+  UpdateOwnReviewBody,
 } from '@/modules/reviews/reviews.schema.ts';
 import type { AuthUser } from '@/types/app.ts';
 
@@ -37,6 +38,12 @@ export interface ReviewsService {
     productId: string,
     body: CreateProductReviewBody,
   ): Promise<PublicProductReview>;
+  updateOwnProductReview(
+    actor: AuthUser,
+    productId: string,
+    body: UpdateOwnReviewBody,
+  ): Promise<PublicProductReview>;
+  deleteOwnProductReview(actor: AuthUser, productId: string): Promise<void>;
   moderateReview(
     actor: AuthUser,
     reviewId: string,
@@ -55,6 +62,9 @@ function serializeReview(row: ProductReviewWithAuthorRow): PublicProductReview {
     rating: row.rating,
     comment: row.comment,
     isPublished: row.isPublished,
+    isActive: isRecordActive(row),
+    status: toRecordStatus(row),
+    deletedAt: row.deletedAt !== null ? row.deletedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -71,7 +81,7 @@ export function createReviewsService(
       query: ListProductReviewsQuery,
     ): Promise<CursorPage<PublicProductReview>> {
       const product = await productsRepo.findById(productId);
-      if (product === null || !product.isActive) {
+      if (product === null || !isRecordActive(product)) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
@@ -80,21 +90,10 @@ export function createReviewsService(
         productId,
         limit: query.limit + 1,
         ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+        ...(query.rating !== undefined ? { rating: query.rating } : {}),
       });
 
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
-
-      return {
-        data: pageItems.map(serializeReview),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
-      };
+      return buildCursorPage(rows, query.limit, serializeReview);
     },
 
     async listAdminReviews(
@@ -102,42 +101,30 @@ export function createReviewsService(
       query: ListAdminReviewsQuery,
     ): Promise<CursorPage<PublicProductReview>> {
       assertAdminUser(actor);
-      assertCursorOrPage(query);
 
-      if (query.page !== undefined) {
-        const offset = (query.page - 1) * query.limit;
-        const { items, total } = await reviewsRepo.listAdminOffset({
-          limit: query.limit,
-          offset,
-          ...(query.productId !== undefined ? { productId: query.productId } : {}),
-          ...(query.isPublished !== undefined ? { isPublished: query.isPublished } : {}),
-          ...(query.rating !== undefined ? { rating: query.rating } : {}),
-        });
-        return buildOffsetPage(items.map(serializeReview), total, query.page, query.limit);
-      }
-
-      const decodedCursor = query.cursor !== undefined ? decodeCursor(query.cursor) : undefined;
-      const rows = await reviewsRepo.listAdminCursor({
-        limit: query.limit + 1,
-        ...(decodedCursor !== undefined ? { cursor: decodedCursor } : {}),
+      const filters = {
         ...(query.productId !== undefined ? { productId: query.productId } : {}),
+        ...(query.userId !== undefined ? { userId: query.userId } : {}),
         ...(query.isPublished !== undefined ? { isPublished: query.isPublished } : {}),
         ...(query.rating !== undefined ? { rating: query.rating } : {}),
-      });
-
-      const hasMore = rows.length > query.limit;
-      const pageItems = hasMore ? rows.slice(0, query.limit) : rows;
-      const lastItem = pageItems[pageItems.length - 1];
-      const nextCursor = hasMore && lastItem !== undefined ? encodeCursor(lastItem) : null;
-
-      return {
-        data: pageItems.map(serializeReview),
-        meta: {
-          nextCursor,
-          hasMore,
-          limit: query.limit,
-        },
+        ...(query.q !== undefined ? { query: query.q } : {}),
+        ...(query.status !== undefined ? { status: query.status } : {}),
+        ...(query.createdFrom !== undefined ? { createdFrom: query.createdFrom } : {}),
+        ...(query.createdTo !== undefined ? { createdTo: query.createdTo } : {}),
       };
+
+      return paginateAdminList({
+        query,
+        listOffset: ({ limit, offset }) =>
+          reviewsRepo.listAdminOffset({ limit, offset, ...filters }),
+        listCursor: ({ limit, cursor }) =>
+          reviewsRepo.listAdminCursor({
+            limit,
+            ...(cursor !== undefined ? { cursor } : {}),
+            ...filters,
+          }),
+        serialize: serializeReview,
+      });
     },
 
     async createProductReview(
@@ -154,7 +141,7 @@ export function createReviewsService(
         ]);
       }
       const product = await productsRepo.findById(productId);
-      if (product === null || !product.isActive) {
+      if (product === null || !isRecordActive(product)) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
@@ -171,6 +158,47 @@ export function createReviewsService(
       return serializeReview(created);
     },
 
+    async updateOwnProductReview(
+      actor: AuthUser,
+      productId: string,
+      body: UpdateOwnReviewBody,
+    ): Promise<PublicProductReview> {
+      const product = await productsRepo.findById(productId);
+      if (product === null || !isRecordActive(product)) {
+        throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+      }
+
+      const updated = await reviewsRepo.updateOwnReviewAndSyncRating({
+        productId,
+        userId: actor.id,
+        ...(body.rating !== undefined ? { rating: body.rating } : {}),
+        ...(body.comment !== undefined ? { comment: body.comment } : {}),
+      });
+      if (updated === null) {
+        throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
+      }
+
+      revalidator.notify(['products', `product:${product.slug}`]);
+      return serializeReview(updated);
+    },
+
+    async deleteOwnProductReview(actor: AuthUser, productId: string): Promise<void> {
+      const product = await productsRepo.findById(productId);
+      if (product === null || !isRecordActive(product)) {
+        throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+      }
+
+      const deleted = await reviewsRepo.softDeleteOwnReviewAndSyncRating({
+        productId,
+        userId: actor.id,
+      });
+      if (!deleted) {
+        throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
+      }
+
+      revalidator.notify(['products', `product:${product.slug}`]);
+    },
+
     async moderateReview(
       actor: AuthUser,
       reviewId: string,
@@ -178,7 +206,11 @@ export function createReviewsService(
     ): Promise<PublicProductReview> {
       assertAdminUser(actor);
 
-      const updated = await reviewsRepo.updatePublishStateAndSyncRating(reviewId, body.isPublished);
+      const nextActive = resolveActiveStateInput(body);
+      const updated = await reviewsRepo.updatePublishStateAndSyncRating(reviewId, {
+        ...(body.isPublished !== undefined ? { isPublished: body.isPublished } : {}),
+        ...(nextActive !== undefined ? { isActive: nextActive } : {}),
+      });
       if (updated === null) {
         throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
       }

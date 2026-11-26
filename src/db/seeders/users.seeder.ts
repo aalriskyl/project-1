@@ -11,6 +11,7 @@ interface SeedUserSpec {
   readonly password: string;
   readonly displayName: string;
   readonly phone: string | null;
+  readonly address: string | null;
   readonly role: UserRole;
 }
 
@@ -45,6 +46,7 @@ async function ensureUser(database: Database, spec: SeedUserSpec): Promise<strin
     passwordHash,
     displayName: spec.displayName,
     phone: spec.phone,
+    address: spec.address,
     role: spec.role,
   });
   return id;
@@ -62,6 +64,7 @@ export async function seedUsers(
     password: options.adminPassword,
     displayName: 'Tsuzumi Admin',
     phone: '+628111000222',
+    address: 'Jl. Pangeran Jayakarta No. 129, Jakarta Pusat',
     role: 'admin',
   });
 
@@ -70,6 +73,7 @@ export async function seedUsers(
     password: options.customerPassword,
     displayName: 'Andi Pratama',
     phone: '+6281234567890',
+    address: 'Jl. Industri Raya No. 45, Cikarang, Bekasi',
     role: 'user',
   });
 
@@ -78,6 +82,7 @@ export async function seedUsers(
     password: options.customerPassword,
     displayName: 'Budi Santoso',
     phone: '+6281298765432',
+    address: 'Jl. Raya Darmo No. 88, Surabaya',
     role: 'user',
   });
 
@@ -88,6 +93,7 @@ export async function seedUsers(
       password: options.devSuperAdmin.password,
       displayName: 'Pelangi Superadmin',
       phone: '+628111000001',
+      address: 'Jl. Pangeran Jayakarta No. 129, Jakarta Pusat',
       role: 'admin',
     });
     count += 1;
