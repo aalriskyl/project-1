@@ -8,7 +8,7 @@ import {
   products,
 } from '@/db/schema/products.ts';
 import type { SeededProductsResult } from '@/db/seeders/types.ts';
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 
 interface SeedProductSpec {
   readonly key: string;

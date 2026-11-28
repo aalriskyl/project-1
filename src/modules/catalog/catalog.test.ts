@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { ConflictError, ForbiddenError, ValidationError } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
+import { ConflictError, ForbiddenError, ValidationError } from '@/lib/shared/errors.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import {

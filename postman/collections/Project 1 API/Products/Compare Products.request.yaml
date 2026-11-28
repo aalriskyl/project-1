@@ -5,11 +5,11 @@ order: 3000
 queryParams:
   - key: ids
     value: '{{productId}},{{sparepartProductId}}'
-    description: Comma-separated 2..4 product UUIDs (mutually exclusive with slugs)
+    description: Preferred - comma-separated 2..4 product UUIDs (mutually exclusive with slugs)
   - key: slugs
     value: genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50
     disabled: true
-    description: 'Optional alternative: comma-separated 2..4 product slugs (for shareable URLs)'
+    description: 'Deprecated - comma-separated 2..4 product slugs. Use ids instead; removed after 26 Feb 2027. Responses carry Deprecation and Sunset headers.'
 scripts:
   - type: afterResponse
     language: text/javascript

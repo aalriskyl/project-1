@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/asset-url.ts';
-import { generateId } from '@/lib/id.ts';
-import { ConflictError } from '@/lib/errors.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
-import { createSupabaseStorageProvider, type StorageProvider } from '@/lib/storage.ts';
+import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/shared/asset-url.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
+import { createSupabaseStorageProvider, type StorageProvider } from '@/lib/integrations/storage.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { createCatalogService } from '@/modules/catalog/catalog.service.ts';

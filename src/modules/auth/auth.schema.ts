@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
 import {
   PhoneE164Schema,
   UserAddressSchema,

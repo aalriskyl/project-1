@@ -1,10 +1,13 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('reviews');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok, okPage } from '@/lib/response.ts';
-import { getRequiredUser, requireAuth } from '@/middlewares/auth.ts';
-import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
-import { publicCache } from '@/middlewares/cache-control.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok, okPage } from '@/lib/api/response.ts';
+import { getRequiredUser, requireAuth } from '@/middlewares/auth/auth.ts';
+import { getRequiredAdmin, requireAdmin } from '@/middlewares/auth/authorize.ts';
+import { publicCache } from '@/middlewares/cache/cache-control.ts';
 import { ProductIdParamSchema } from '@/modules/products/products.schema.ts';
 import {
   CreateProductReviewBodySchema,
@@ -255,6 +258,10 @@ const moderateReviewRoute = createRoute({
       description: 'Review not found',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    422: {
+      description: 'Invalid UUID path parameter',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
   },
 });
 
@@ -283,6 +290,10 @@ const deleteReviewRoute = createRoute({
     },
     404: {
       description: 'Review not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: 'Invalid UUID path parameter',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },

@@ -3,7 +3,7 @@ import { env } from '@/config/env.ts';
 import { closeDb, type Database, db } from '@/db/client.ts';
 import { seedDatabase } from '@/db/seed.ts';
 import type { SeedSummary } from '@/db/seeders/types.ts';
-import { logger } from '@/lib/logger.ts';
+import { logger } from '@/lib/logging/logger.ts';
 
 /**
  * Truncates all application tables in `public` (preserving schema, RLS, indexes, and
@@ -28,6 +28,7 @@ export async function refreshDatabase(database: Database): Promise<SeedSummary> 
       public.mail_outbox,
       public.password_reset_tokens,
       public.refresh_tokens,
+      public.slug_redirects,
       public.users
     RESTART IDENTITY CASCADE
   `);

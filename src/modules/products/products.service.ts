@@ -6,19 +6,25 @@ import type {
   ProductRow,
   ProductSpecsMap,
 } from '@/db/schema/products.ts';
-import { NotFoundError, ValidationError, type ValidationIssueDetail } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
+import { type ResponseCache, noopCache } from '@/lib/cache/cache.ts';
+import { sanitizeMarkdown } from '@/lib/shared/markdown.ts';
+import { NotFoundError, ValidationError, type ValidationIssueDetail } from '@/lib/shared/errors.ts';
+import { generateId } from '@/lib/auth/id.ts';
 import {
   buildCursorPage,
   type CursorPage,
   decodeCursor,
   encodeCursor,
   paginateAdminList,
-} from '@/lib/pagination.ts';
-import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
-import { slugify } from '@/lib/slug.ts';
-import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+} from '@/lib/api/pagination.ts';
+import { type RevalidateNotifier, revalidateNotifier } from '@/lib/integrations/revalidate.ts';
+import { slugify } from '@/lib/shared/slug.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/api/status.ts';
+import {
+  type RedirectRepository,
+  noopRedirectRepository,
+} from '@/modules/seo/redirects.repository.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type { RelatedProductCard } from '@/modules/articles/articles.schema.ts';
 import type { CatalogRepository } from '@/modules/catalog/catalog.repository.ts';
 import type { SpecFieldDef } from '@/modules/catalog/catalog.schema.ts';
@@ -29,6 +35,7 @@ import type {
   ProductSparepartCardRow,
   ProductsRepository,
 } from '@/modules/products/products.repository.ts';
+import { ProductDetailSchema } from '@/modules/products/products.schema.ts';
 import type {
   CompareProductsQuery,
   CreateProductBody,
@@ -52,6 +59,7 @@ import type { AuthUser } from '@/types/app.ts';
 const COMPARE_MIN_ITEMS = 2;
 const COMPARE_MAX_ITEMS = 4;
 const DEFAULT_RELATED_LIMIT = 6;
+const PRODUCT_DETAIL_CACHE_TTL_SEC = 60;
 
 const UuidValidator = z.uuid();
 const SlugValidator = z
@@ -126,6 +134,7 @@ function decodeProductSortCursor(rawCursor: string, sort: ProductSort): ProductS
 export interface ProductsService {
   listPublicProducts(query: ListProductsQuery): Promise<CursorPage<ProductCard>>;
   getPublicProductBySlug(slug: string, query: GetProductDetailQuery): Promise<ProductDetail>;
+  getPublicProductById(id: string): Promise<ProductDetail>;
   compareProducts(query: CompareProductsQuery): Promise<{
     readonly specSchema: readonly SpecFieldDef[];
     readonly products: readonly ProductDetail[];
@@ -279,6 +288,8 @@ export function createProductsService(
   productsRepo: ProductsRepository,
   catalogRepo: CatalogRepository,
   revalidator: RevalidateNotifier = revalidateNotifier,
+  redirectsRepo: RedirectRepository = noopRedirectRepository,
+  cache: ResponseCache = noopCache,
 ): ProductsService {
   async function resolveCategoryWithSchema(categoryId: string): Promise<{
     readonly category: CategoryRow;
@@ -434,6 +445,13 @@ export function createProductsService(
       slug: string,
       query: GetProductDetailQuery,
     ): Promise<ProductDetail> {
+      const includeKey = [...(query.include ?? [])].sort().join(',');
+      const cacheKey = `product:detail:${slug}:${includeKey}`;
+      const cached = await cache.getJson(cacheKey, ProductDetailSchema);
+      if (cached !== null) {
+        return cached;
+      }
+
       const product = await productsRepo.findActiveBySlug(slug);
       if (product === null) {
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
@@ -454,12 +472,31 @@ export function createProductsService(
           : Promise.resolve(undefined),
       ]);
 
-      return serializeProductDetail(product, schemaInfo.category, schemaInfo.effectiveSpecSchema, {
-        ...(sparepartRows !== undefined
-          ? { spareparts: sparepartRows.map(serializeSparepartItem) }
-          : {}),
-        ...(relatedRows !== undefined ? { related: relatedRows.map(serializeProductCard) } : {}),
-      });
+      const detail = serializeProductDetail(
+        product,
+        schemaInfo.category,
+        schemaInfo.effectiveSpecSchema,
+        {
+          ...(sparepartRows !== undefined
+            ? { spareparts: sparepartRows.map(serializeSparepartItem) }
+            : {}),
+          ...(relatedRows !== undefined ? { related: relatedRows.map(serializeProductCard) } : {}),
+        },
+      );
+      await cache.setJson(cacheKey, detail, PRODUCT_DETAIL_CACHE_TTL_SEC, [
+        `product:${slug}`,
+        'categories',
+      ]);
+      return detail;
+    },
+
+    async getPublicProductById(id) {
+      const [product] = await productsRepo.findActiveByIds([id]);
+      if (product === undefined) {
+        throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
+      }
+      const schemaInfo = await resolveCategoryWithSchema(product.categoryId);
+      return serializeProductDetail(product, schemaInfo.category, schemaInfo.effectiveSpecSchema);
     },
 
     async compareProducts(query: CompareProductsQuery) {
@@ -524,10 +561,12 @@ export function createProductsService(
       }
 
       if (orderedRows.length < COMPARE_MIN_ITEMS) {
-        throw new NotFoundError(
-          'At least 2 active products are required for comparison',
-          'COMPARE_PRODUCTS_NOT_FOUND',
-        );
+        throw new ValidationError('At least 2 active products are required for comparison', [
+          {
+            field: query.slugs !== undefined ? 'slugs' : 'ids',
+            message: `Provide at least ${COMPARE_MIN_ITEMS} matching active products`,
+          },
+        ]);
       }
 
       const uniqueCatIds = [...new Set(orderedRows.map((r) => r.categoryId))];
@@ -721,7 +760,10 @@ export function createProductsService(
         slug: resolvedSlug,
         sku: input.sku ?? null,
         productType: input.productType,
-        descriptionMd: input.descriptionMd ?? null,
+        descriptionMd:
+          input.descriptionMd !== undefined && input.descriptionMd !== null
+            ? sanitizeMarkdown(input.descriptionMd)
+            : null,
         metaTitle: input.metaTitle ?? null,
         metaDescription: input.metaDescription ?? null,
         focusKeyword: input.focusKeyword ?? null,
@@ -744,6 +786,7 @@ export function createProductsService(
         weightKg: formatNumericInput(input.weightKg),
       });
 
+      await redirectsRepo.claimSlug('product', created.slug);
       await revalidator.notify(['products', `product:${created.slug}`, 'sitemap']);
       return serializeProductDetail(created, schemaInfo.category, schemaInfo.effectiveSpecSchema);
     },
@@ -792,7 +835,12 @@ export function createProductsService(
         ...(input.slug !== undefined ? { slug: input.slug } : {}),
         ...(input.sku !== undefined ? { sku: input.sku } : {}),
         ...(input.productType !== undefined ? { productType: input.productType } : {}),
-        ...(input.descriptionMd !== undefined ? { descriptionMd: input.descriptionMd } : {}),
+        ...(input.descriptionMd !== undefined
+          ? {
+              descriptionMd:
+                input.descriptionMd !== null ? sanitizeMarkdown(input.descriptionMd) : null,
+            }
+          : {}),
         ...(input.metaTitle !== undefined ? { metaTitle: input.metaTitle } : {}),
         ...(input.metaDescription !== undefined ? { metaDescription: input.metaDescription } : {}),
         ...(input.focusKeyword !== undefined ? { focusKeyword: input.focusKeyword } : {}),
@@ -824,6 +872,9 @@ export function createProductsService(
         throw new NotFoundError('Product not found', 'PRODUCT_NOT_FOUND');
       }
 
+      if (input.slug !== undefined && input.slug !== existing.slug) {
+        await redirectsRepo.recordSlugChange('product', existing.slug, updated.slug);
+      }
       await revalidator.notify([
         'products',
         'articles',

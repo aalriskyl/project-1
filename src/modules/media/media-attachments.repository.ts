@@ -2,15 +2,41 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { env } from '@/config/env.ts';
 import type { Database } from '@/db/client.ts';
 import { mediaReferences, mediaUploads } from '@/db/schema/media-uploads.ts';
-import { extractReferencedObjectPaths } from '@/lib/asset-url.ts';
-import { ConflictError } from '@/lib/errors.ts';
+import { extractReferencedObjectPaths } from '@/lib/shared/asset-url.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
 
 export type MediaTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
-export type MediaOwner = 'products' | 'categories' | 'articles';
+export type MediaOwner = 'products' | 'categories' | 'articles' | 'uploads';
 
-// Shared by attachment commits, upload completion and deletion claims. No network I/O under this lock.
-export async function lockMediaLifecycle(tx: MediaTransaction): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(724193, 1)`);
+const MEDIA_LOCK_SEED = 724193;
+const ORPHAN_SWEEP_LOCK_KEY = 'media:orphan-sweep';
+
+/**
+ * Advisory locks are keyed per entity so concurrent edits to different rows never
+ * block each other. A single cluster-wide lock here would queue every catalog
+ * write behind one transaction and exhaust the transaction-pool connections.
+ */
+export function mediaEntityLockKey(owner: MediaOwner, ownerId: string): string {
+  return `media:${owner}:${ownerId}`;
+}
+
+async function acquireAdvisoryLock(tx: MediaTransaction, lockKey: string): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, ${MEDIA_LOCK_SEED}))`,
+  );
+}
+
+export async function lockMediaEntity(
+  tx: MediaTransaction,
+  owner: MediaOwner,
+  ownerId: string,
+): Promise<void> {
+  await acquireAdvisoryLock(tx, mediaEntityLockKey(owner, ownerId));
+}
+
+/** The orphan claim sweep still needs mutual exclusion, but only for its own short transaction. */
+export async function lockOrphanSweep(tx: MediaTransaction): Promise<void> {
+  await acquireAdvisoryLock(tx, ORPHAN_SWEEP_LOCK_KEY);
 }
 
 export function collectMediaStrings(value: unknown): string[] {
@@ -63,7 +89,28 @@ export async function syncMediaReferences(
       'MEDIA_NOT_VERIFIED',
     );
   }
-  const nextIds = new Set(uploads.map((u) => u.id));
+  // Lock each upload before deciding whether it is still attachable. The orphan
+  // sweep takes the same per-upload lock before claiming an unreferenced file.
+  for (const upload of uploads) {
+    await lockMediaEntity(tx, 'uploads', upload.id);
+  }
+  const freshUploads =
+    uploads.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(mediaUploads)
+          .where(
+            inArray(
+              mediaUploads.id,
+              uploads.map((upload) => upload.id),
+            ),
+          );
+  if (freshUploads.length !== uploads.length) {
+    throw new ConflictError('A referenced media upload disappeared', 'MEDIA_NOT_VERIFIED');
+  }
+
+  const nextIds = new Set(freshUploads.map((u) => u.id));
   if (existingIds.size === nextIds.size && [...nextIds].every((id) => existingIds.has(id))) {
     return;
   }
@@ -79,10 +126,11 @@ export async function syncMediaReferences(
 export async function withMediaMutation<T extends { id: string; deletedAt: Date | null } | null>(
   db: Database,
   owner: MediaOwner,
+  ownerId: string,
   mutate: (tx: MediaTransaction) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await lockMediaLifecycle(tx);
+    await lockMediaEntity(tx, owner, ownerId);
     const row = await mutate(tx);
     if (row !== null) await syncMediaReferences(tx, owner, row);
     return row;

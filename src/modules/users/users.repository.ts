@@ -8,9 +8,9 @@ import {
   buildDescCursorCondition,
   buildStatusFilterConditions,
   isUniqueViolation,
-} from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
-import { buildFuzzySearchCondition } from '@/lib/search.ts';
+} from '@/lib/shared/db-helpers.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
+import { buildFuzzySearchCondition } from '@/lib/api/search.ts';
 import type { UserRole } from '@/types/app.ts';
 import type {
   AdminDateListFilter,

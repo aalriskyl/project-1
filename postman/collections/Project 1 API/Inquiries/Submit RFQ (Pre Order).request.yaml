@@ -1,0 +1,30 @@
+$kind: http-request
+method: POST
+url: '{{baseUrl}}/v1/inquiries'
+order: 1000
+headers:
+  - key: Idempotency-Key
+    value: '{{$guid}}'
+    description: Unique retry key; repeat requests with the same value return the original receipt
+body:
+  type: json
+  content: |-
+    {
+      "productId": null,
+      "name": "Andi Saputra",
+      "email": "andi@example.com",
+      "phone": "+628123456789",
+      "message": "Saya ingin penawaran harga genset 30 kVA untuk proyek industri."
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 201', () => {
+        pm.response.to.have.status(201);
+      });
+      pm.test('Returns an inquiry receipt', () => {
+        const json = pm.response.json();
+        pm.expect(json.data.status).to.eql('new');
+        pm.expect(json.data.id).to.be.a('string');
+      });

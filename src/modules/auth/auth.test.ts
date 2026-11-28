@@ -1,8 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { ConflictError, ErrorResponseSchema, UnauthorizedError } from '@/lib/errors.ts';
-import type { GoogleTokenVerifier } from '@/lib/google-oauth.ts';
-import type { PasswordResetEmailInput } from '@/lib/mailer.ts';
+import { hashTokenSha256 } from '@/lib/auth/crypto.ts';
+import {
+  ConflictError,
+  ErrorResponseSchema,
+  ForbiddenError,
+  UnauthorizedError,
+} from '@/lib/shared/errors.ts';
+import type { GoogleTokenVerifier } from '@/lib/integrations/google-oauth.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { hashPassword } from '@/lib/auth/password.ts';
+import type { PasswordResetEmailInput } from '@/lib/integrations/mailer.ts';
 import { AuthSessionEnvelopeSchema } from '@/modules/auth/auth.schema.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { createUsersService } from '@/modules/users/users.service.ts';
@@ -90,6 +98,68 @@ describe('AuthService (unit)', () => {
       expiredService.refresh({ refreshToken: session.tokens.refreshToken }),
     ).rejects.toBeInstanceOf(UnauthorizedError);
   });
+
+  test('rejects deactivated accounts across login, refresh, reset and Google sign-in', async () => {
+    const store = createInMemoryDatastore();
+    const inactiveId = generateId();
+    const rawRefreshToken = 'inactive-user-refresh-token-value';
+    await store.authRepo.insertRefreshToken({
+      id: generateId(),
+      userId: inactiveId,
+      familyId: generateId(),
+      tokenHash: hashTokenSha256(rawRefreshToken),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    store.seedUser({
+      id: inactiveId,
+      email: 'inactive@example.com',
+      passwordHash: await hashPassword('correct-horse-battery-staple'),
+      displayName: 'Inactive User',
+      isActive: false,
+    });
+
+    const sentEmails: PasswordResetEmailInput[] = [];
+    const service = createAuthService(store.authRepo, {
+      mailer: {
+        sendPasswordResetEmail(input) {
+          sentEmails.push(input);
+          return Promise.resolve();
+        },
+        sendInquiryEmail() {
+          return Promise.resolve();
+        },
+      },
+      googleVerifier: {
+        verifyIdToken: () =>
+          Promise.resolve({
+            sub: 'inactive-google-sub',
+            email: 'inactive@example.com',
+            displayName: 'Inactive User',
+          }),
+      },
+    });
+    const actor = { id: inactiveId, email: 'inactive@example.com', role: 'user' as const };
+
+    await expect(
+      service.login({ email: 'inactive@example.com', password: 'correct-horse-battery-staple' }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.refresh({ refreshToken: rawRefreshToken })).rejects.toMatchObject({
+      code: 'ACCOUNT_INACTIVE',
+    });
+    expect((await service.forgotPassword({ email: 'inactive@example.com' })).message).toContain(
+      'If an account exists',
+    );
+    expect(sentEmails).toHaveLength(0);
+    await expect(service.googleLogin({ idToken: 'any-google-token' })).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+    await expect(
+      service.changePassword(actor, {
+        currentPassword: 'correct-horse-battery-staple',
+        newPassword: 'brand-new-password-123',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
 });
 
 describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, refresh, logout)', () => {
@@ -134,6 +204,9 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
             sentEmails.push(input);
             return Promise.resolve();
           },
+          sendInquiryEmail() {
+            return Promise.resolve();
+          },
         },
       }),
       usersService: createUsersService(store.usersRepo),
@@ -141,8 +214,30 @@ describe('Auth HTTP routes (/v1/auth — register, login, google, forgot/reset, 
       authRateLimitMax,
     });
 
-    return { testApp, sentEmails };
+    return { testApp, sentEmails, store };
   }
+
+  test('POST /login rejects a deactivated account with 403 ACCOUNT_INACTIVE', async () => {
+    const { testApp, store } = setupTestApp();
+    store.seedUser({
+      id: generateId(),
+      email: 'deactivated@example.com',
+      passwordHash: await hashPassword('correct-horse-battery-staple'),
+      displayName: 'Deactivated User',
+      isActive: false,
+    });
+
+    const res = await testApp.request('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: 'deactivated@example.com',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(ErrorResponseSchema.parse(await res.json()).errorCode).toBe('ACCOUNT_INACTIVE');
+  });
 
   test('POST /register, /login, /google account linking, /forgot-password + /reset-password session revocation, and /logout', async () => {
     const { testApp, sentEmails } = setupTestApp();

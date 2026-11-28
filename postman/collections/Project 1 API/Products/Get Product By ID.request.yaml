@@ -1,0 +1,21 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/products/by-id/:id'
+order: 2500
+description: 'Stable UUID lookup for clients that already have an id from list responses or RFQs. Use this instead of re-resolving by slug.'
+pathVariables:
+  - key: id
+    value: '{{productId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns the requested product detail', () => {
+        const json = pm.response.json();
+        pm.expect(json.success).to.eql(true);
+        pm.expect(json.data.id).to.eql(pm.environment.get('productId'));
+        pm.expect(json.data.slug).to.be.a('string');
+      });

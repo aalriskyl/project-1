@@ -4,6 +4,7 @@ coverage/
 bun.lock
 src/db/migrations/
 .postman/
+.opencode/
 postman/
 AGENTS.md
 

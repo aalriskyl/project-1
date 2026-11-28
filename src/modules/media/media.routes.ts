@@ -1,9 +1,12 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('media');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok } from '@/lib/response.ts';
-import { requireAuth } from '@/middlewares/auth.ts';
-import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok } from '@/lib/api/response.ts';
+import { requireAuth } from '@/middlewares/auth/auth.ts';
+import { getRequiredAdmin, requireAdmin } from '@/middlewares/auth/authorize.ts';
 import {
   CleanupOrphansBodySchema,
   CleanupOrphansEnvelopeSchema,

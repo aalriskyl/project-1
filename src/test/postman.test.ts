@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { app } from '@/app.ts';
-import { ERROR_CODES } from '@/lib/errors.ts';
+import { ERROR_CODES } from '@/lib/shared/errors.ts';
 
 const hasPostmanWorkspace = existsSync('postman/specs/openapi.json');
 

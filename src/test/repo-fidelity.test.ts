@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 import { createInMemoryDatastore } from '@/test/in-memory-repos.ts';
 
 describe('in-memory repository join fidelity', () => {
@@ -41,5 +41,36 @@ describe('in-memory repository join fidelity', () => {
     const offsetPage = await store.productsRepo.listAdminOffset({ limit: 10, offset: 0 });
     expect(offsetPage.items).toHaveLength(0);
     expect(offsetPage.total).toBe(0);
+  });
+
+  test('excludes reviews whose product row is absent, matching the SQL innerJoin', async () => {
+    const store = createInMemoryDatastore();
+    const missingProductId = generateId();
+    const authorId = generateId();
+    store.seedUser({
+      id: authorId,
+      email: 'reviewer@example.com',
+      passwordHash: null,
+      displayName: 'Reviewer',
+    });
+    store.seedOrphanReview({
+      id: generateId(),
+      productId: missingProductId,
+      userId: authorId,
+      orderId: null,
+      rating: 5,
+      comment: 'orphan review',
+    });
+
+    expect(await store.reviewsRepo.listAdminCursor({ limit: 10 })).toHaveLength(0);
+    const offsetPage = await store.reviewsRepo.listAdminOffset({ limit: 10, offset: 0 });
+    expect(offsetPage.items).toHaveLength(0);
+    expect(offsetPage.total).toBe(0);
+    expect(
+      await store.reviewsRepo.listPublishedByProductCursor({
+        productId: missingProductId,
+        limit: 10,
+      }),
+    ).toHaveLength(0);
   });
 });

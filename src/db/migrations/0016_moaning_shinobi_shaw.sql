@@ -1,0 +1,1 @@
+ALTER TABLE "inquiries" ADD COLUMN "request_fingerprint" varchar(64) NOT NULL;

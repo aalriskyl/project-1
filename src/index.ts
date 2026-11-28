@@ -1,10 +1,10 @@
 import { app } from '@/app.ts';
 import { env } from '@/config/env.ts';
 import { closeDb, db } from '@/db/client.ts';
-import { logger } from '@/lib/logger.ts';
-import { closeRedis } from '@/lib/redis.ts';
-import { startMailWorker } from '@/lib/mail-worker.ts';
-import { mailProvider } from '@/lib/mailer.ts';
+import { logger } from '@/lib/logging/logger.ts';
+import { closeRedis } from '@/lib/integrations/redis.ts';
+import { startMailWorker } from '@/lib/integrations/mail-worker.ts';
+import { mailProvider } from '@/lib/integrations/mailer.ts';
 import { createNotificationsRepository } from '@/modules/notifications/notifications.repository.ts';
 import { createNotificationsService } from '@/modules/notifications/notifications.service.ts';
 
@@ -51,7 +51,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     // Stop accepting new connections while allowing active requests to complete.
     await server.stop(false);
     await stopMailWorker();
-    closeRedis();
+    await closeRedis();
     await closeDb();
     logger.info('graceful shutdown complete');
     process.exit(0);

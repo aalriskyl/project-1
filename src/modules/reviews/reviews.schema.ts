@@ -4,12 +4,13 @@ import {
   CreatedFromQuerySchema,
   CreatedToQuerySchema,
   createCursorPageSchema,
+  CursorPaginationQuerySchema,
   QueryBooleanSchema,
-} from '@/lib/pagination.ts';
-import { AuthorSummaryRefSchema, ProductSummaryRefSchema } from '@/lib/relations.ts';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { SearchQueryParamSchema } from '@/lib/search.ts';
-import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
+} from '@/lib/api/pagination.ts';
+import { AuthorSummaryRefSchema, ProductSummaryRefSchema } from '@/lib/shared/relations.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import { SearchQueryParamSchema } from '@/lib/api/search.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/api/status.ts';
 
 export const ProductReviewSchema = z
   .object({
@@ -33,12 +34,7 @@ export const ProductReviewSchema = z
 
 export type PublicProductReview = z.infer<typeof ProductReviewSchema>;
 
-export const ListProductReviewsQuerySchema = z.object({
-  cursor: z
-    .string()
-    .min(1)
-    .optional()
-    .openapi({ param: { name: 'cursor', in: 'query' } }),
+export const ListProductReviewsQuerySchema = CursorPaginationQuerySchema.extend({
   limit: z.coerce
     .number()
     .int()

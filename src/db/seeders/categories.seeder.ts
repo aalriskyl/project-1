@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { categories, type SpecFieldDefRow } from '@/db/schema/categories.ts';
 import type { SeededCategoriesResult } from '@/db/seeders/types.ts';
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 
 interface SeedCategorySpec {
   readonly key: string;

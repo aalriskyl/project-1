@@ -1,8 +1,11 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('users');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok, okPage } from '@/lib/response.ts';
-import { getRequiredUser, requireAuth } from '@/middlewares/auth.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok, okPage } from '@/lib/api/response.ts';
+import { getRequiredUser, requireAuth } from '@/middlewares/auth/auth.ts';
 import {
   CreateAdminUserBodySchema,
   ListUsersQuerySchema,

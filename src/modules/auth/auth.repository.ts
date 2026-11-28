@@ -4,8 +4,8 @@ import { mailOutbox, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
 import { passwordResetTokens } from '@/db/schema/password-reset-tokens.ts';
 import { refreshTokens } from '@/db/schema/refresh-tokens.ts';
 import { users } from '@/db/schema/users.ts';
-import { isUniqueViolation } from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
+import { isUniqueViolation } from '@/lib/shared/db-helpers.ts';
+import { ConflictError, UnauthorizedError } from '@/lib/shared/errors.ts';
 import type { UserEntity, UserWithCredentials } from '@/modules/users/users.repository.ts';
 import type { UserRole } from '@/types/app.ts';
 
@@ -66,6 +66,10 @@ export interface AuthRepository {
   }): Promise<UserEntity>;
   insertRefreshToken(token: NewRefreshTokenInput): Promise<void>;
   findRefreshTokenWithUserByHash(tokenHash: string): Promise<RefreshTokenWithUser | null>;
+  findRefreshTokenStateById(id: string): Promise<{
+    readonly revokedAt: Date | null;
+    readonly replacedByTokenId: string | null;
+  } | null>;
   rotateRefreshToken(params: {
     readonly currentTokenId: string;
     readonly nextToken: NewRefreshTokenInput;
@@ -367,6 +371,18 @@ export function createAuthRepository(db: Database): AuthRepository {
       };
     },
 
+    async findRefreshTokenStateById(id) {
+      const [row] = await db
+        .select({
+          revokedAt: refreshTokens.revokedAt,
+          replacedByTokenId: refreshTokens.replacedByTokenId,
+        })
+        .from(refreshTokens)
+        .where(eq(refreshTokens.id, id))
+        .limit(1);
+      return row ?? null;
+    },
+
     async rotateRefreshToken({ currentTokenId, nextToken, revokedAt }): Promise<boolean> {
       return db.transaction(async (tx) => {
         const [revoked] = await tx
@@ -476,7 +492,12 @@ export function createAuthRepository(db: Database): AuthRepository {
           .returning({ id: users.id });
 
         if (updatedUser === undefined) {
-          return false;
+          // Roll back the token consumption: burning a reset link without changing
+          // the password would permanently strand a valid recovery attempt.
+          throw new UnauthorizedError(
+            'Cannot reset password for an inactive account',
+            'ACCOUNT_INACTIVE',
+          );
         }
 
         // Revoke all active sessions and any remaining unused reset tokens for this user.

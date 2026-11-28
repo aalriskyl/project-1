@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne, type SQL, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, ne, type SQL, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { type ArticleRow, articles } from '@/db/schema/articles.ts';
 import { users } from '@/db/schema/users.ts';
@@ -8,9 +8,9 @@ import {
   buildDescCursorCondition,
   buildStatusFilterConditions,
   isUniqueViolation,
-} from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
-import { buildFuzzySearchCondition } from '@/lib/search.ts';
+} from '@/lib/shared/db-helpers.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
+import { buildFuzzySearchCondition } from '@/lib/api/search.ts';
 import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
 import type {
   AdminDateListFilter,
@@ -190,6 +190,9 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
         );
       }
 
+      // Published rows must carry published_at (migration 0013 backfills and
+      // constrains it); excluding NULL keeps the keyset predicate consistent.
+      conditions.push(isNotNull(articles.publishedAt));
       const cursorCond = buildDescCursorCondition(articles.publishedAt, articles.id, cursor);
       if (cursorCond !== undefined) {
         conditions.push(cursorCond);
@@ -380,7 +383,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
 
     async create(input: CreateArticleRecord): Promise<ArticleDetailRow> {
       try {
-        return await withMediaMutation(db, 'articles', async (tx) => {
+        return await withMediaMutation(db, 'articles', input.id, async (tx) => {
           const [created] = await tx
             .insert(articles)
             .values({
@@ -429,7 +432,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
 
     async updateById(id: string, patch: UpdateArticleRecord): Promise<ArticleDetailRow | null> {
       try {
-        return await withMediaMutation(db, 'articles', async (tx) => {
+        return await withMediaMutation(db, 'articles', id, async (tx) => {
           const [updated] = await tx
             .update(articles)
             .set({
@@ -465,7 +468,7 @@ export function createArticlesRepository(db: Database): ArticlesRepository {
     },
 
     async softDeleteById(id: string, deletedAt: Date): Promise<boolean> {
-      const deleted = await withMediaMutation(db, 'articles', async (tx) => {
+      const deleted = await withMediaMutation(db, 'articles', id, async (tx) => {
         const [row] = await tx
           .update(articles)
           .set({ isActive: false, deletedAt, updatedAt: new Date() })

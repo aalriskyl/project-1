@@ -4,12 +4,12 @@ import type { ArticleRow } from '@/db/schema/articles.ts';
 import type { CategoryRow } from '@/db/schema/categories.ts';
 import type { MediaUploadRow } from '@/db/schema/media-uploads.ts';
 import type { PasswordResetTokenRow } from '@/db/schema/password-reset-tokens.ts';
-import type { ProductReviewRow } from '@/db/schema/product-reviews.ts';
+import type { NewProductReviewRow, ProductReviewRow } from '@/db/schema/product-reviews.ts';
 import type { ProductRow } from '@/db/schema/products.ts';
-import { extractReferencedObjectPaths } from '@/lib/asset-url.ts';
-import { ConflictError, NotFoundError } from '@/lib/errors.ts';
-import { matchesFuzzyInMemory } from '@/lib/search.ts';
-import { isRecordActive, type RecordStatus } from '@/lib/status.ts';
+import { extractReferencedObjectPaths } from '@/lib/shared/asset-url.ts';
+import { ConflictError, NotFoundError } from '@/lib/shared/errors.ts';
+import { matchesFuzzyInMemory } from '@/lib/api/search.ts';
+import { isRecordActive, type RecordStatus } from '@/lib/api/status.ts';
 import type {
   ArticleDetailRow,
   ArticlesRepository,
@@ -115,6 +115,7 @@ export interface InMemoryDatastore {
     readonly address?: string | null;
     readonly displayName: string;
     readonly role?: UserRole;
+    readonly isActive?: boolean;
     readonly createdAt?: Date;
   }): UserEntity;
   seedMediaUpload(params: {
@@ -126,6 +127,8 @@ export interface InMemoryDatastore {
     readonly uploadedBy: string;
     readonly createdAt: Date;
   }): MediaUploadRow;
+  /** Inserts a review row without a product, to test innerJoin fidelity in list queries. */
+  seedOrphanReview(params: NewProductReviewRow): void;
 }
 
 function matchesStatusFilter(
@@ -388,6 +391,15 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         }
       }
       return Promise.resolve(null);
+    },
+
+    findRefreshTokenStateById(id) {
+      const token = tokensById.get(id);
+      return Promise.resolve(
+        token === undefined
+          ? null
+          : { revokedAt: token.revokedAt, replacedByTokenId: token.replacedByTokenId },
+      );
     },
 
     rotateRefreshToken({ currentTokenId, nextToken, revokedAt }): Promise<boolean> {
@@ -1881,15 +1893,20 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         )
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
         .slice(0, limit);
-      for (const row of rows) mediaUploadsById.set(row.id, { ...row, deletingAt: now });
-      return Promise.resolve(rows);
+      const claimed = rows.map((row) => ({ ...row, deletingAt: now }));
+      for (const row of claimed) mediaUploadsById.set(row.id, row);
+      return Promise.resolve(claimed);
     },
 
-    releaseOrphanClaims(ids): Promise<void> {
-      for (const id of ids) {
-        const existing = mediaUploadsById.get(id);
-        if (existing !== undefined && existing.deletedAt === null) {
-          mediaUploadsById.set(id, { ...existing, deletingAt: null });
+    releaseOrphanClaims(claims): Promise<void> {
+      for (const claim of claims) {
+        const existing = mediaUploadsById.get(claim.id);
+        if (
+          existing !== undefined &&
+          existing.deletedAt === null &&
+          existing.deletingAt?.getTime() === claim.deletingAt.getTime()
+        ) {
+          mediaUploadsById.set(claim.id, { ...existing, deletingAt: null });
         }
       }
       return Promise.resolve();
@@ -1925,7 +1942,7 @@ export function createInMemoryDatastore(): InMemoryDatastore {
         address: params.address ?? null,
         displayName: params.displayName,
         role: params.role ?? 'user',
-        isActive: true,
+        isActive: params.isActive ?? true,
         tokenVersion: 1,
         createdAt,
         updatedAt: createdAt,
@@ -1944,6 +1961,19 @@ export function createInMemoryDatastore(): InMemoryDatastore {
       };
       mediaUploadsById.set(row.id, row);
       return row;
+    },
+    seedOrphanReview(params): void {
+      const now = new Date();
+      reviewsById.set(params.id, {
+        ...params,
+        isPublished: params.isPublished ?? true,
+        isActive: params.isActive ?? true,
+        createdAt: params.createdAt ?? now,
+        updatedAt: params.updatedAt ?? now,
+        deletedAt: params.deletedAt ?? null,
+        orderId: params.orderId ?? null,
+        comment: params.comment ?? null,
+      });
     },
   };
 }

@@ -40,6 +40,12 @@ export const queryClient: Sql = postgres(env.DATABASE_URL, {
   connect_timeout: env.DB_CONNECT_TIMEOUT_SEC,
   ssl: resolveSslMode(env.DATABASE_URL, env.NODE_ENV),
   onnotice: false,
+  // Hono's timeout only stops waiting on the client; these make Postgres cancel
+  // the work itself so timed-out requests cannot keep pool connections occupied.
+  connection: {
+    statement_timeout: env.REQUEST_TIMEOUT_MS,
+    lock_timeout: env.REQUEST_TIMEOUT_MS,
+  },
 });
 
 export type Database = PostgresJsDatabase<typeof schema>;

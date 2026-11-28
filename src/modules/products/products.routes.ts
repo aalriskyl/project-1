@@ -1,11 +1,16 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('products');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok, okPage } from '@/lib/response.ts';
-import { requireAuth } from '@/middlewares/auth.ts';
-import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
-import { publicCache } from '@/middlewares/cache-control.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok, okPage } from '@/lib/api/response.ts';
+import { requireAuth } from '@/middlewares/auth/auth.ts';
+import { getRequiredAdmin, requireAdmin } from '@/middlewares/auth/authorize.ts';
+import { publicCache } from '@/middlewares/cache/cache-control.ts';
 import {
+  COMPARE_SLUGS_REMOVAL_DATE,
+  COMPARE_SLUGS_SUNSET_HTTP_DATE,
   CompareProductsEnvelopeSchema,
   CompareProductsQuerySchema,
   CreateProductBodySchema,
@@ -54,8 +59,7 @@ const compareProductsRoute = createRoute({
   path: '/compare',
   tags: ['Products'],
   summary: 'Compare Products',
-  description:
-    'Compare 2 to 4 active products in a single batched query with aligned `specSchema` rows.',
+  description: `Compare 2 to 4 active products in a single batched query with aligned \`specSchema\` rows. Prefer \`?ids=\`; \`?slugs=\` is deprecated and will be removed after ${COMPARE_SLUGS_REMOVAL_DATE}.`,
   request: {
     query: CompareProductsQuerySchema,
   },
@@ -64,12 +68,8 @@ const compareProductsRoute = createRoute({
       description: 'Aligned specSchema + product details',
       content: { 'application/json': { schema: CompareProductsEnvelopeSchema } },
     },
-    404: {
-      description: 'Fewer than 2 matching active products found',
-      content: { 'application/json': { schema: ErrorResponseSchema } },
-    },
     422: {
-      description: 'Invalid ids or slugs query parameter',
+      description: 'Invalid ids/slugs query parameter or fewer than 2 matching active products',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
@@ -119,6 +119,26 @@ const listSparepartsRoute = createRoute({
     },
     422: {
       description: 'Invalid product ID or cursor',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+  },
+});
+
+const getProductByIdRoute = createRoute({
+  method: 'get',
+  path: '/by-id/{id}',
+  tags: ['Products'],
+  summary: 'Get Product by ID',
+  description:
+    'Public product lookup by UUID for clients that already have an id from lists or RFQs.',
+  request: { params: ProductIdParamSchema },
+  responses: {
+    200: {
+      description: 'Product detail',
+      content: { 'application/json': { schema: ProductDetailEnvelopeSchema } },
+    },
+    404: {
+      description: 'Product not found',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
@@ -207,6 +227,10 @@ const getAdminProductRoute = createRoute({
     },
     404: {
       description: 'Product not found',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
+    422: {
+      description: 'Invalid UUID path parameter',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
   },
@@ -322,6 +346,10 @@ const deleteProductRoute = createRoute({
       description: 'Product not found',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    422: {
+      description: 'Invalid UUID path parameter',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
   },
 });
 
@@ -381,6 +409,10 @@ export function createPublicProductsRoutes(productsService: ProductsService) {
     })
     .openapi(compareProductsRoute, async (c) => {
       const query = c.req.valid('query');
+      if (query.slugs !== undefined) {
+        c.header('Deprecation', 'true');
+        c.header('Sunset', COMPARE_SLUGS_SUNSET_HTTP_DATE);
+      }
       const result = await productsService.compareProducts(query);
       return c.json(
         ok(
@@ -403,6 +435,10 @@ export function createPublicProductsRoutes(productsService: ProductsService) {
       const query = c.req.valid('query');
       const page = await productsService.listProductSpareparts(id, query);
       return c.json(okPage(page, 'Product spare parts retrieved successfully'), 200);
+    })
+    .openapi(getProductByIdRoute, async (c) => {
+      const data = await productsService.getPublicProductById(c.req.valid('param').id);
+      return c.json(ok(data, 'Product retrieved successfully'), 200);
     })
     .openapi(getProductBySlugRoute, async (c) => {
       const { slug } = c.req.valid('param');

@@ -1,16 +1,20 @@
 import { and, eq, gt, isNull, lt, lte, or } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
-import { mailOutbox, type MailOutboxRow } from '@/db/schema/mail-outbox.ts';
-import { generateId } from '@/lib/id.ts';
+import { mailOutbox, type MailOutboxRow, type NewMailDelivery } from '@/db/schema/mail-outbox.ts';
+import { generateId } from '@/lib/auth/id.ts';
 
 export const MAX_MAIL_ATTEMPTS = 8;
 export interface NotificationsRepository {
+  enqueue(delivery: NewMailDelivery): Promise<void>;
   claim(now: Date): Promise<MailOutboxRow | null>;
   finish(id: string, leaseId: string, now: Date): Promise<void>;
   retry(id: string, leaseId: string, nextAttemptAt: Date): Promise<void>;
 }
 export function createNotificationsRepository(db: Database): NotificationsRepository {
   return {
+    async enqueue(delivery) {
+      await db.insert(mailOutbox).values(delivery);
+    },
     async claim(now) {
       return db.transaction(async (tx) => {
         // Expired or exhausted jobs retain no reset token or recipient data.

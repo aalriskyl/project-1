@@ -1,14 +1,15 @@
-import { NotFoundError, ValidationError } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
+import { NotFoundError, ValidationError } from '@/lib/shared/errors.ts';
+import { sanitizeMarkdown } from '@/lib/shared/markdown.ts';
+import { generateId } from '@/lib/auth/id.ts';
 import {
   buildCursorPage,
   type CursorPage,
   decodeCursor,
   paginateAdminList,
-} from '@/lib/pagination.ts';
-import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
-import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+} from '@/lib/api/pagination.ts';
+import { type RevalidateNotifier, revalidateNotifier } from '@/lib/integrations/revalidate.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/api/status.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type { ProductsRepository } from '@/modules/products/products.repository.ts';
 import type {
   ProductReviewWithAuthorRow,
@@ -160,10 +161,13 @@ export function createReviewsService(
         userId: actor.id,
         orderId: body.orderId ?? null,
         rating: body.rating,
-        comment: body.comment ?? null,
+        comment:
+          body.comment !== undefined && body.comment !== null
+            ? sanitizeMarkdown(body.comment)
+            : null,
       });
 
-      await revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`, 'sitemap']);
       return serializeReview(created);
     },
 
@@ -181,13 +185,17 @@ export function createReviewsService(
         productId,
         userId: actor.id,
         ...(body.rating !== undefined ? { rating: body.rating } : {}),
-        ...(body.comment !== undefined ? { comment: body.comment } : {}),
+        ...(body.comment !== undefined
+          ? {
+              comment: body.comment !== null ? sanitizeMarkdown(body.comment) : null,
+            }
+          : {}),
       });
       if (updated === null) {
         throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
       }
 
-      await revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`, 'sitemap']);
       return serializeReview(updated);
     },
 
@@ -205,7 +213,7 @@ export function createReviewsService(
         throw new NotFoundError('Review not found', 'REVIEW_NOT_FOUND');
       }
 
-      await revalidator.notify(['products', `product:${product.slug}`]);
+      await revalidator.notify(['products', `product:${product.slug}`, 'sitemap']);
     },
 
     async moderateReview(
@@ -226,7 +234,7 @@ export function createReviewsService(
 
       const product = await productsRepo.findById(updated.productId);
       if (product !== null) {
-        await revalidator.notify(['products', `product:${product.slug}`]);
+        await revalidator.notify(['products', `product:${product.slug}`, 'sitemap']);
       }
 
       return serializeReview(updated);
@@ -242,7 +250,7 @@ export function createReviewsService(
 
       const product = await productsRepo.findById(deleted.productId);
       if (product !== null) {
-        await revalidator.notify(['products', `product:${product.slug}`]);
+        await revalidator.notify(['products', `product:${product.slug}`, 'sitemap']);
       }
     },
   };

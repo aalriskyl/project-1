@@ -9,9 +9,9 @@ import {
   buildDescCursorCondition,
   buildStatusFilterConditions,
   isUniqueViolation,
-} from '@/lib/db-helpers.ts';
-import { ConflictError, NotFoundError } from '@/lib/errors.ts';
-import { buildFuzzySearchCondition } from '@/lib/search.ts';
+} from '@/lib/shared/db-helpers.ts';
+import { ConflictError, NotFoundError } from '@/lib/shared/errors.ts';
+import { buildFuzzySearchCondition } from '@/lib/api/search.ts';
 import type {
   AdminDateListFilter,
   CursorListParams,
@@ -271,12 +271,13 @@ export function createReviewsRepository(db: Database): ReviewsRepository {
           .orderBy(desc(productReviews.createdAt), desc(productReviews.id))
           .limit(limit)
           .offset(offset),
-        db
-          .select({ total: sql<number>`count(*)::int` })
-          .from(productReviews)
-          .innerJoin(users, eq(productReviews.userId, users.id))
-          .innerJoin(products, eq(productReviews.productId, products.id))
-          .where(whereClause),
+        (query !== undefined
+          ? db
+              .select({ total: sql<number>`count(*)::int` })
+              .from(productReviews)
+              .innerJoin(users, eq(productReviews.userId, users.id))
+          : db.select({ total: sql<number>`count(*)::int` }).from(productReviews)
+        ).where(whereClause),
       ]);
 
       return { items, total: countRows[0]?.total ?? 0 };

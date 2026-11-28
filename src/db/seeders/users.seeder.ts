@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { users } from '@/db/schema/users.ts';
 import type { SeededUsersResult } from '@/db/seeders/types.ts';
-import { generateId } from '@/lib/id.ts';
-import { hashPassword } from '@/lib/password.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { hashPassword } from '@/lib/auth/password.ts';
 import type { UserRole } from '@/types/app.ts';
 
 interface SeedUserSpec {

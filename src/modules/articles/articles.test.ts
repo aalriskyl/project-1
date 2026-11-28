@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
 import {
   ArticleCursorPageSchema,
   ArticleDetailEnvelopeSchema,

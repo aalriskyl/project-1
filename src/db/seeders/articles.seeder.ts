@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { articles } from '@/db/schema/articles.ts';
 import type { SeededArticlesResult } from '@/db/seeders/types.ts';
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 
 interface SeedArticleSpec {
   readonly title: string;

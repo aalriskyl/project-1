@@ -1,13 +1,17 @@
 import { z } from '@hono/zod-openapi';
 import type { SpecFieldDefRow } from '@/db/schema/categories.ts';
-import { noopCache, type ResponseCache } from '@/lib/cache.ts';
-import { ConflictError, NotFoundError, ValidationError } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
-import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
-import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
-import { slugify } from '@/lib/slug.ts';
-import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+import { noopCache, type ResponseCache } from '@/lib/cache/cache.ts';
+import { ConflictError, NotFoundError, ValidationError } from '@/lib/shared/errors.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { type CursorPage, paginateAdminList } from '@/lib/api/pagination.ts';
+import { type RevalidateNotifier, revalidateNotifier } from '@/lib/integrations/revalidate.ts';
+import { slugify } from '@/lib/shared/slug.ts';
+import {
+  type RedirectRepository,
+  noopRedirectRepository,
+} from '@/modules/seo/redirects.repository.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/api/status.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type {
   CatalogRepository,
   CategoryWithParentRow,
@@ -127,6 +131,7 @@ export function createCatalogService(
   catalogRepo: CatalogRepository,
   revalidator: RevalidateNotifier = revalidateNotifier,
   cache: ResponseCache = noopCache,
+  redirectsRepo: RedirectRepository = noopRedirectRepository,
 ): CatalogService {
   async function validateParentAssignment(
     parentId: string | null | undefined,
@@ -390,6 +395,7 @@ export function createCatalogService(
         deletedAt: resolvedActive ? null : new Date(),
       });
 
+      await redirectsRepo.claimSlug('category', created.slug);
       await revalidator.notify(['categories', `category:${created.slug}`, 'sitemap']);
       return serializeCategory({
         ...created,
@@ -470,6 +476,9 @@ export function createCatalogService(
         throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
       }
 
+      if (input.slug !== undefined && input.slug !== existing.slug) {
+        await redirectsRepo.recordSlugChange('category', existing.slug, updated.slug);
+      }
       await revalidator.notify([
         'categories',
         `category:${existing.slug}`,

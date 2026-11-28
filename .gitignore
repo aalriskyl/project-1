@@ -10,8 +10,9 @@ node_modules/
 dist/
 coverage/
 
-# Internal planning notes
+# Internal planning notes and local tool state
 docs/
+.opencode/
 
 # OS & editor files
 .DS_Store

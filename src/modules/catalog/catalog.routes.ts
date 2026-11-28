@@ -1,10 +1,13 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('catalog');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok, okPage } from '@/lib/response.ts';
-import { requireAuth } from '@/middlewares/auth.ts';
-import { getRequiredAdmin, requireAdmin } from '@/middlewares/authorize.ts';
-import { publicCache } from '@/middlewares/cache-control.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok, okPage } from '@/lib/api/response.ts';
+import { requireAuth } from '@/middlewares/auth/auth.ts';
+import { getRequiredAdmin, requireAdmin } from '@/middlewares/auth/authorize.ts';
+import { publicCache } from '@/middlewares/cache/cache-control.ts';
 import {
   CategoryCursorPageSchema,
   CategoryDetailEnvelopeSchema,
@@ -15,7 +18,6 @@ import {
   CreateCategoryBodySchema,
   ListAdminCategoriesQuerySchema,
   ListCategoriesQuerySchema,
-  SitemapResponseSchema,
   UpdateCategoryBodySchema,
 } from '@/modules/catalog/catalog.schema.ts';
 import type { CatalogService } from '@/modules/catalog/catalog.service.ts';
@@ -65,21 +67,6 @@ const getCategoryBySlugRoute = createRoute({
     422: {
       description: 'Invalid slug format',
       content: { 'application/json': { schema: ErrorResponseSchema } },
-    },
-  },
-});
-
-const getSitemapRoute = createRoute({
-  method: 'get',
-  path: '/sitemap',
-  tags: ['SEO'],
-  summary: 'Get SEO Sitemap Feed',
-  description:
-    'Return indexable (`noIndex = false`) slugs and `updatedAt` timestamps for Next.js `app/sitemap.ts`.',
-  responses: {
-    200: {
-      description: 'Sitemap entries across categories, products, and articles',
-      content: { 'application/json': { schema: SitemapResponseSchema } },
     },
   },
 });
@@ -268,6 +255,10 @@ const deleteCategoryRoute = createRoute({
       description: 'Category still has subcategories',
       content: { 'application/json': { schema: ErrorResponseSchema } },
     },
+    422: {
+      description: 'Invalid UUID path parameter',
+      content: { 'application/json': { schema: ErrorResponseSchema } },
+    },
   },
 });
 
@@ -287,17 +278,6 @@ export function createPublicCatalogRoutes(catalogService: CatalogService) {
       const data = await catalogService.getPublicCategoryBySlug(slug);
       return c.json(ok(data, 'Category retrieved successfully'), 200);
     });
-}
-
-export function createSeoRoutes(catalogService: CatalogService) {
-  const router = new OpenAPIHono<AppEnv>({ defaultHook: defaultOpenApiHook });
-
-  router.use('*', publicCache({ maxAgeSec: 300, sMaxAgeSec: 3600, staleWhileRevalidateSec: 3600 }));
-
-  return router.openapi(getSitemapRoute, async (c) => {
-    const data = await catalogService.getSitemap();
-    return c.json(ok(data, 'Sitemap feed retrieved successfully'), 200);
-  });
 }
 
 export function createAdminCatalogRoutes(

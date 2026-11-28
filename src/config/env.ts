@@ -1,11 +1,18 @@
 import { z } from 'zod';
 
-const PostgresUrlSchema = z
-  .string()
-  .min(1)
-  .refine((val) => val.startsWith('postgres://') || val.startsWith('postgresql://'), {
-    message: 'Must be a valid postgres:// or postgresql:// connection string',
-  });
+const DEV_DEFAULT_CORS_ORIGIN = 'http://localhost:3000';
+
+const PostgresUrlSchema = z.url().refine((val) => {
+  try {
+    const parsed = new URL(val);
+    return (
+      (parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:') &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}, 'Must be a valid postgres:// or postgresql:// connection string');
 
 const CorsOriginsSchema = z
   .string()
@@ -35,6 +42,21 @@ const CorsOriginsSchema = z
     },
   );
 
+const PLACEHOLDER_SECRET_PATTERNS = [
+  /change-me/i,
+  /replace-with/i,
+  /your[-_]?/i,
+  /example/i,
+  /test-only/i,
+  /local-dev/i,
+] as const;
+
+function isPlaceholderSecret(secret: string): boolean {
+  return (
+    PLACEHOLDER_SECRET_PATTERNS.some((pattern) => pattern.test(secret)) || new Set(secret).size < 10
+  );
+}
+
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -52,10 +74,14 @@ const EnvSchema = z
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+    INQUIRY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
     REDIS_URL: z
       .url()
       .refine((v) => /^rediss?:\/\//.test(v))
       .optional(),
+    // Explicit choice required in production: 'socket' uses the peer address only,
+    // 'trusted-proxy' reads forwarded headers from the listed proxies.
+    CLIENT_IP_SOURCE: z.enum(['socket', 'trusted-proxy']).optional(),
     TRUSTED_PROXY_IPS: z
       .string()
       .default('')
@@ -69,7 +95,8 @@ const EnvSchema = z
 
     DATABASE_URL: PostgresUrlSchema,
     DIRECT_URL: PostgresUrlSchema.optional(),
-    DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(5),
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(3),
+    EXPECTED_MAX_REPLICAS: z.coerce.number().int().min(1).max(100).optional(),
     DB_IDLE_TIMEOUT_SEC: z.coerce.number().int().positive().default(20),
     DB_CONNECT_TIMEOUT_SEC: z.coerce.number().int().positive().default(10),
 
@@ -97,11 +124,55 @@ const EnvSchema = z
       .regex(/^[a-fA-F0-9]{64}$/)
       .optional(),
     MAIL_FROM: z.string().min(3).max(160).default('Tsuzumi Japan <no-reply@tsuzumijapan.com>'),
+    // Where RFQ/pre-order requests are emailed. Omit to store inquiries without email.
+    INQUIRY_NOTIFICATION_EMAIL: z.email().optional(),
     APP_PUBLIC_URL: z.url().default('http://localhost:3001'),
+    // Public website origin used to build absolute URLs in JSON-LD. Falls back to
+    // the first CORS origin when omitted so existing deployments keep working.
+    PUBLIC_SITE_URL: z.url().optional(),
+    PUBLIC_SITE_NAME: z.string().trim().min(1).max(120).default('Tsuzumi Japan'),
     PASSWORD_RESET_TTL_SEC: z.coerce.number().int().min(300).max(86_400).default(1_800),
   })
   .superRefine((value, ctx) => {
+    if (
+      (value.NEXTJS_REVALIDATE_URL === undefined) !==
+      (value.NEXTJS_REVALIDATE_SECRET === undefined)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['NEXTJS_REVALIDATE_URL'],
+        message: 'NEXTJS_REVALIDATE_URL and NEXTJS_REVALIDATE_SECRET must be set together',
+      });
+    }
     if (value.NODE_ENV !== 'production') return;
+    if (isPlaceholderSecret(value.JWT_ACCESS_SECRET))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['JWT_ACCESS_SECRET'],
+        message: 'JWT_ACCESS_SECRET must be a high-entropy secret, not a documented placeholder',
+      });
+    if (value.CLIENT_IP_SOURCE === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CLIENT_IP_SOURCE'],
+        message: 'CLIENT_IP_SOURCE must be set explicitly in production (socket or trusted-proxy)',
+      });
+    if (
+      value.EXPECTED_MAX_REPLICAS !== undefined &&
+      value.DB_POOL_MAX * value.EXPECTED_MAX_REPLICAS > 50
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DB_POOL_MAX'],
+        message:
+          'DB_POOL_MAX * EXPECTED_MAX_REPLICAS exceeds 50; reduce the pool or the replica count',
+      });
+    if (value.CLIENT_IP_SOURCE === 'trusted-proxy' && value.TRUSTED_PROXY_IPS.length === 0)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUSTED_PROXY_IPS'],
+        message: 'TRUSTED_PROXY_IPS must be non-empty when CLIENT_IP_SOURCE=trusted-proxy',
+      });
     for (const field of ['REDIS_URL', 'RESEND_API_KEY', 'MAIL_OUTBOX_ENCRYPTION_KEY'] as const) {
       if (value[field] === undefined)
         ctx.addIssue({
@@ -116,6 +187,12 @@ const EnvSchema = z
         path: ['APP_PUBLIC_URL'],
         message: 'Production reset links must use HTTPS',
       });
+    if (value.PUBLIC_SITE_URL !== undefined && !value.PUBLIC_SITE_URL.startsWith('https://'))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_SITE_URL'],
+        message: 'PUBLIC_SITE_URL must use HTTPS in production',
+      });
   });
 
 export type Env = Omit<z.infer<typeof EnvSchema>, 'LOG_LEVEL'> & {
@@ -123,7 +200,13 @@ export type Env = Omit<z.infer<typeof EnvSchema>, 'LOG_LEVEL'> & {
 };
 
 export function parseEnv(rawEnv: Record<string, string | undefined>): Env {
-  const parsed = EnvSchema.safeParse(rawEnv);
+  const corsOrigins =
+    rawEnv['CORS_ORIGINS'] ??
+    (rawEnv['NODE_ENV'] === 'production' ? undefined : DEV_DEFAULT_CORS_ORIGIN);
+  const parsed = EnvSchema.safeParse({
+    ...rawEnv,
+    ...(corsOrigins !== undefined ? { CORS_ORIGINS: corsOrigins } : {}),
+  });
   if (!parsed.success) {
     const formattedIssues = parsed.error.issues.map((issue) => ({
       field: issue.path.join('.'),
@@ -135,6 +218,20 @@ export function parseEnv(rawEnv: Record<string, string | undefined>): Env {
     ...parsed.data,
     LOG_LEVEL: parsed.data.LOG_LEVEL ?? (parsed.data.NODE_ENV === 'test' ? 'silent' : 'info'),
   };
+}
+
+/**
+ * Proxy IPs whose forwarded headers may be trusted. Unset CLIENT_IP_SOURCE keeps
+ * the previous behaviour for non-production environments that already configured
+ * TRUSTED_PROXY_IPS; production must make the choice explicitly.
+ */
+export function resolveTrustedProxyIps(environment: Env): readonly string[] {
+  return environment.CLIENT_IP_SOURCE === 'socket' ? [] : environment.TRUSTED_PROXY_IPS;
+}
+
+/** Absolute origin of the public website, used for canonical and JSON-LD URLs. */
+export function resolvePublicSiteUrl(environment: Env): string {
+  return environment.PUBLIC_SITE_URL ?? environment.CORS_ORIGINS[0] ?? 'http://localhost:3000';
 }
 
 export const env: Env = parseEnv(process.env);

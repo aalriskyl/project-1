@@ -1,18 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { Hono } from 'hono';
+import pino from 'pino';
 import postgres from 'postgres';
 import { z } from 'zod';
 import { createApp } from '@/app.ts';
 import { parseEnv } from '@/config/env.ts';
 import * as schema from '@/db/schema/index.ts';
-import { ErrorResponseSchema } from '@/lib/errors.ts';
+import { ErrorResponseSchema, ServiceUnavailableError } from '@/lib/shared/errors.ts';
+import { errorHandler } from '@/middlewares/error/error-handler.ts';
+import type { RateLimitStore } from '@/middlewares/security/rate-limit.ts';
 import { createAuthRepository } from '@/modules/auth/auth.repository.ts';
 import { AuthSessionEnvelopeSchema } from '@/modules/auth/auth.schema.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { createUsersRepository } from '@/modules/users/users.repository.ts';
 import { createUsersService } from '@/modules/users/users.service.ts';
 import { createInMemoryDatastore } from '@/test/in-memory-repos.ts';
+import type { AppEnv } from '@/types/app.ts';
 
 const OpenApiSummarySchema = z.object({
   openapi: z.string(),
@@ -115,13 +120,20 @@ describe('Application core invariants', () => {
     const validBase = {
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/db',
       CORS_ORIGINS: 'http://localhost:3000',
-      JWT_ACCESS_SECRET: 'a'.repeat(32),
+      JWT_ACCESS_SECRET: 'aB3dE5gH7jK9mN2pQ4rS6tV8xZ0aB3dE5gH',
     };
 
     expect(() => parseEnv(validBase)).not.toThrow();
     expect(() => parseEnv({ ...validBase, CORS_ORIGINS: '*' })).toThrow();
     expect(() => parseEnv({ ...validBase, JWT_ACCESS_SECRET: 'too-short' })).toThrow();
     expect(() => parseEnv({ ...validBase, DATABASE_URL: 'mysql://localhost/db' })).toThrow();
+    expect(() => parseEnv({ ...validBase, DATABASE_URL: 'postgres://' })).toThrow();
+    expect(() =>
+      parseEnv({ ...validBase, NEXTJS_REVALIDATE_URL: 'http://localhost:3001/api/revalidate' }),
+    ).toThrow(/NEXTJS_REVALIDATE/);
+    expect(() => parseEnv({ ...validBase, NEXTJS_REVALIDATE_SECRET: 'a'.repeat(16) })).toThrow(
+      /NEXTJS_REVALIDATE/,
+    );
     expect(() => parseEnv({ ...validBase, NODE_ENV: 'production' })).toThrow();
     const production = {
       ...validBase,
@@ -130,10 +142,103 @@ describe('Application core invariants', () => {
       RESEND_API_KEY: 'test-resend-key',
       MAIL_OUTBOX_ENCRYPTION_KEY: 'a'.repeat(64),
       APP_PUBLIC_URL: 'https://example.com',
+      CLIENT_IP_SOURCE: 'socket',
     };
     expect(() => parseEnv(production)).not.toThrow();
     expect(() => parseEnv({ ...production, APP_PUBLIC_URL: 'http://example.com' })).toThrow();
     expect(() => parseEnv({ ...production, TRUSTED_PROXY_IPS: 'trusted.example.com' })).toThrow();
+    expect(() => parseEnv({ ...production, CLIENT_IP_SOURCE: undefined })).toThrow(
+      /CLIENT_IP_SOURCE/,
+    );
+    expect(() => parseEnv({ ...production, CLIENT_IP_SOURCE: 'trusted-proxy' })).toThrow(
+      /TRUSTED_PROXY_IPS/,
+    );
+    expect(() =>
+      parseEnv({
+        ...production,
+        CLIENT_IP_SOURCE: 'trusted-proxy',
+        TRUSTED_PROXY_IPS: '127.0.0.1',
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseEnv({
+        ...production,
+        JWT_ACCESS_SECRET: 'change-me-to-a-cryptographically-random-secret',
+      }),
+    ).toThrow(/JWT_ACCESS_SECRET/);
+  });
+
+  test('parseEnv defaults CORS to localhost:3000 outside production and requires it in production', () => {
+    const base = {
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/db',
+      JWT_ACCESS_SECRET: 'a'.repeat(32),
+    };
+
+    expect(parseEnv(base).CORS_ORIGINS).toEqual(['http://localhost:3000']);
+    expect(parseEnv({ ...base, NODE_ENV: 'test' }).CORS_ORIGINS).toEqual(['http://localhost:3000']);
+    expect(parseEnv({ ...base, CORS_ORIGINS: 'http://localhost:5173' }).CORS_ORIGINS).toEqual([
+      'http://localhost:5173',
+    ]);
+    expect(() => parseEnv({ ...base, NODE_ENV: 'production' })).toThrow(/CORS_ORIGINS/);
+  });
+
+  test('logs 5xx AppErrors server-side without leaking them to clients', async () => {
+    const lines: string[] = [];
+    const capturedLogger = pino(
+      { level: 'error' },
+      {
+        write: (line: string) => {
+          lines.push(line);
+        },
+      },
+    );
+    const probe = new Hono<AppEnv>();
+    probe.use('*', (c, next) => {
+      c.set('logger', capturedLogger);
+      return next();
+    });
+    probe.get('/boom', () => {
+      throw new ServiceUnavailableError('Dependency is down', 'SERVICE_UNAVAILABLE');
+    });
+    probe.onError(errorHandler);
+
+    const res = await probe.request('/boom');
+    expect(res.status).toBe(503);
+    const body = ErrorResponseSchema.parse(await res.json());
+    expect(body.errorCode).toBe('SERVICE_UNAVAILABLE');
+    expect(lines.some((line) => line.includes('SERVICE_UNAVAILABLE'))).toBe(true);
+  });
+
+  test('maps an unsupported Content-Type to 400 instead of a server error', async () => {
+    const store = createInMemoryDatastore();
+    const testApp = createApp({
+      authService: createAuthService(store.authRepo),
+      usersService: createUsersService(store.usersRepo),
+    });
+
+    const res = await testApp.request('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: 'not json',
+    });
+    expect(res.status).toBe(400);
+    const body = ErrorResponseSchema.parse(await res.json());
+    expect(body.errorCode).toBe('BAD_REQUEST');
+  });
+
+  test('applies the global rate limiter once to the OpenAPI spec route', async () => {
+    let count = 0;
+    const rateLimitStore: RateLimitStore = {
+      increment: () => Promise.resolve({ count: ++count, resetAtMs: Date.now() + 60_000 }),
+    };
+    const testApp = createApp({ rateLimitStore, globalRateLimitMax: 5 });
+
+    expect((await testApp.request('/v1/openapi.json')).headers.get('RateLimit-Remaining')).toBe(
+      '4',
+    );
+    expect((await testApp.request('/v1/openapi.json')).headers.get('RateLimit-Remaining')).toBe(
+      '3',
+    );
   });
 });
 

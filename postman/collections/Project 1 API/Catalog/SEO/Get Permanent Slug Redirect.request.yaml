@@ -1,0 +1,24 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/seo/redirect?type=product&slug=old-product-slug'
+order: 3200
+queryParams:
+  - key: type
+    value: product
+    description: Entity type (product, category or article)
+  - key: slug
+    value: old-product-slug
+    description: Old slug to resolve; returns 404 when no redirect is registered
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 or 404', () => {
+        pm.expect(pm.response.code).to.be.oneOf([200, 404]);
+      });
+      pm.test('Returns a permanent target when found', () => {
+        if (pm.response.code !== 200) return;
+        const json = pm.response.json();
+        pm.expect(json.data.permanent).to.be.true;
+        pm.expect(json.data.newSlug).to.be.a('string');
+      });

@@ -1,7 +1,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook } from '@/lib/errors.ts';
-import { requireAuth } from '@/middlewares/auth.ts';
+import { defaultOpenApiHook } from '@/lib/shared/errors.ts';
+import { requireAuth } from '@/middlewares/auth/auth.ts';
 import {
   createAdminArticlesRoutes,
   createPublicArticlesRoutes,
@@ -10,9 +10,13 @@ import type { ArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthRoutes } from '@/modules/auth/auth.routes.ts';
 import type { AuthService } from '@/modules/auth/auth.service.ts';
 import {
+  createAdminInquiriesRoutes,
+  createPublicInquiriesRoutes,
+} from '@/modules/inquiries/inquiries.routes.ts';
+import type { InquiriesService } from '@/modules/inquiries/inquiries.service.ts';
+import {
   createAdminCatalogRoutes,
   createPublicCatalogRoutes,
-  createSeoRoutes,
 } from '@/modules/catalog/catalog.routes.ts';
 import type { CatalogService } from '@/modules/catalog/catalog.service.ts';
 import { createAdminMediaRoutes } from '@/modules/media/media.routes.ts';
@@ -27,6 +31,8 @@ import {
   createProductReviewsRoutes,
 } from '@/modules/reviews/reviews.routes.ts';
 import type { ReviewsService } from '@/modules/reviews/reviews.service.ts';
+import { createSeoRoutes } from '@/modules/seo/seo.routes.ts';
+import type { SeoService } from '@/modules/seo/seo.service.ts';
 import { createUsersRoutes } from '@/modules/users/users.routes.ts';
 import type { UsersService } from '@/modules/users/users.service.ts';
 import type { AppEnv } from '@/types/app.ts';
@@ -38,9 +44,12 @@ export interface V1RoutesDependencies {
   readonly productsService: ProductsService;
   readonly reviewsService: ReviewsService;
   readonly articlesService: ArticlesService;
+  readonly seoService: SeoService;
   readonly mediaService: MediaService;
   readonly globalRateLimiter: MiddlewareHandler<AppEnv>;
   readonly authRateLimiter: MiddlewareHandler<AppEnv>;
+  readonly inquiryRateLimiter: MiddlewareHandler<AppEnv>;
+  readonly inquiryService: InquiriesService;
   readonly authMiddleware?: MiddlewareHandler<AppEnv>;
 }
 
@@ -61,10 +70,12 @@ export function createV1Routes(deps: V1RoutesDependencies) {
     .route('/products', createProductReviewsRoutes(deps.reviewsService, authGuard))
     .route('/products', createPublicProductsRoutes(deps.productsService))
     .route('/articles', createPublicArticlesRoutes(deps.articlesService))
-    .route('/seo', createSeoRoutes(deps.catalogService))
+    .route('/inquiries', createPublicInquiriesRoutes(deps.inquiryService, deps.inquiryRateLimiter))
+    .route('/seo', createSeoRoutes(deps.catalogService, deps.seoService))
     .route('/admin/categories', createAdminCatalogRoutes(deps.catalogService, authGuard))
     .route('/admin/products', createAdminProductsRoutes(deps.productsService, authGuard))
     .route('/admin/reviews', createAdminReviewsRoutes(deps.reviewsService, authGuard))
     .route('/admin/articles', createAdminArticlesRoutes(deps.articlesService, authGuard))
+    .route('/admin/inquiries', createAdminInquiriesRoutes(deps.inquiryService, authGuard))
     .route('/admin/media', createAdminMediaRoutes(deps.mediaService, authGuard));
 }

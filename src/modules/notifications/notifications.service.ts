@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import { decryptMail } from '@/lib/mail-outbox-crypto.ts';
-import type { MailProvider } from '@/lib/mailer.ts';
+import { decryptOutboxMail } from '@/lib/integrations/mail-outbox-crypto.ts';
+import type { MailProvider } from '@/lib/integrations/mailer.ts';
 import {
   MAX_MAIL_ATTEMPTS,
   type NotificationsRepository,
@@ -22,11 +22,18 @@ export function createNotificationsService(
       if (!row) return false;
       if (!row.payload || !row.leaseId) throw new Error('Invalid claimed mail delivery');
       try {
-        const input = await decryptMail(row.payload, key);
-        await mailer.sendPasswordResetEmail({
-          ...input,
-          idempotencyKey: `password-reset/${row.id}`,
-        });
+        const message = await decryptOutboxMail(row.payload, key);
+        if (message.kind === 'inquiry') {
+          await mailer.sendInquiryEmail({
+            ...message.input,
+            idempotencyKey: `inquiry/${row.id}`,
+          });
+        } else {
+          await mailer.sendPasswordResetEmail({
+            ...message.input,
+            idempotencyKey: `password-reset/${row.id}`,
+          });
+        }
       } catch {
         // Never log the provider error object: it may contain recipient or request payloads.
         logger.warn(

@@ -1,0 +1,23 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/seo/structured-data?type=product&slug=genset-30-kva-silent-perkins'
+order: 3100
+queryParams:
+  - key: type
+    value: product
+    description: Entity type (product, category or article)
+  - key: slug
+    value: genset-30-kva-silent-perkins
+    description: Slug of the published entity
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200 OK', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns a schema.org graph', () => {
+        const json = pm.response.json();
+        pm.expect(json.data['@context']).to.eql('https://schema.org');
+        pm.expect(json.data['@graph']).to.be.an('array').that.is.not.empty;
+      });

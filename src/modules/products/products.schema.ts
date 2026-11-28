@@ -1,5 +1,5 @@
 import { z } from '@hono/zod-openapi';
-import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/asset-url.ts';
+import { isAllowedAssetImageUrl, isAllowedAssetVideoUrl } from '@/lib/shared/asset-url.ts';
 import {
   AdminPaginationQuerySchema,
   CreatedFromQuerySchema,
@@ -8,17 +8,17 @@ import {
   CursorPaginationQuerySchema,
   MAX_PAGE_SIZE,
   QueryBooleanSchema,
-} from '@/lib/pagination.ts';
-import { CategorySummaryRefSchema } from '@/lib/relations.ts';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { SearchQueryParamSchema } from '@/lib/search.ts';
+} from '@/lib/api/pagination.ts';
+import { CategorySummaryRefSchema } from '@/lib/shared/relations.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import { SearchQueryParamSchema } from '@/lib/api/search.ts';
 import {
   SeoMetadataCreateFields,
   SeoMetadataResponseFields,
   SeoMetadataUpdateFields,
-} from '@/lib/seo.ts';
-import { createSlugSchema } from '@/lib/slug.ts';
-import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
+} from '@/lib/shared/seo.ts';
+import { createSlugSchema } from '@/lib/shared/slug.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/api/status.ts';
 import { SpecFieldDefSchema } from '@/modules/catalog/catalog.schema.ts';
 
 export const PRODUCT_TYPES = ['equipment', 'sparepart'] as const;
@@ -339,82 +339,74 @@ const ProductSpecFiltersQueryParamSchema = z
     example: 'rated_power_kva:gte:30,silent_canopy:eq:true',
   });
 
-export const ListProductsQuerySchema = z
-  .object({
-    cursor: z
-      .string()
-      .min(1)
-      .optional()
-      .openapi({ param: { name: 'cursor', in: 'query' } }),
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_PAGE_SIZE)
-      .default(20)
-      .openapi({ param: { name: 'limit', in: 'query' }, example: 20 }),
-    sort: ProductSortSchema.default('newest').openapi({
-      param: { name: 'sort', in: 'query' },
-      description: 'Sort order: newest (default), price_asc, price_desc, or rating_desc',
-      example: 'newest',
-    }),
-    categorySlug: ProductSlugSchema.optional().openapi({
-      param: { name: 'categorySlug', in: 'query' },
+export const ListProductsQuerySchema = CursorPaginationQuerySchema.extend({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .default(20)
+    .openapi({ param: { name: 'limit', in: 'query' }, example: 20 }),
+  sort: ProductSortSchema.default('newest').openapi({
+    param: { name: 'sort', in: 'query' },
+    description: 'Sort order: newest (default), price_asc, price_desc, or rating_desc',
+    example: 'newest',
+  }),
+  categorySlug: ProductSlugSchema.optional().openapi({
+    param: { name: 'categorySlug', in: 'query' },
+    description:
+      'Category or subcategory slug (root categories include all child subcategories; mutually exclusive with categoryId)',
+  }),
+  categoryId: z
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'categoryId', in: 'query' },
       description:
-        'Category or subcategory slug (root categories include all child subcategories; mutually exclusive with categoryId)',
+        'Category or subcategory UUID (root categories include all child subcategories; mutually exclusive with categorySlug)',
     }),
-    categoryId: z
-      .uuid()
-      .optional()
-      .openapi({
-        param: { name: 'categoryId', in: 'query' },
-        description:
-          'Category or subcategory UUID (root categories include all child subcategories; mutually exclusive with categorySlug)',
-      }),
-    brandSlug: BrandSlugsQueryParamSchema,
-    isFeatured: QueryBooleanSchema.optional().openapi({
-      param: { name: 'isFeatured', in: 'query' },
+  brandSlug: BrandSlugsQueryParamSchema,
+  isFeatured: QueryBooleanSchema.optional().openapi({
+    param: { name: 'isFeatured', in: 'query' },
+  }),
+  type: ProductTypeSchema.optional().openapi({
+    param: { name: 'type', in: 'query' },
+  }),
+  requiresQuote: QueryBooleanSchema.optional().openapi({
+    param: { name: 'requiresQuote', in: 'query' },
+  }),
+  inStock: QueryBooleanSchema.optional().openapi({
+    param: { name: 'inStock', in: 'query' },
+    description: 'When true returns products with stock > 0; when false returns out-of-stock items',
+  }),
+  minRating: z.coerce
+    .number()
+    .min(1)
+    .max(5)
+    .optional()
+    .openapi({
+      param: { name: 'minRating', in: 'query' },
+      description: 'Minimum average star rating (1..5, e.g. 4 for 4 stars and up)',
+      example: 4,
     }),
-    type: ProductTypeSchema.optional().openapi({
-      param: { name: 'type', in: 'query' },
-    }),
-    requiresQuote: QueryBooleanSchema.optional().openapi({
-      param: { name: 'requiresQuote', in: 'query' },
-    }),
-    inStock: QueryBooleanSchema.optional().openapi({
-      param: { name: 'inStock', in: 'query' },
-      description:
-        'When true returns products with stock > 0; when false returns out-of-stock items',
-    }),
-    minRating: z.coerce
-      .number()
-      .min(1)
-      .max(5)
-      .optional()
-      .openapi({
-        param: { name: 'minRating', in: 'query' },
-        description: 'Minimum average star rating (1..5, e.g. 4 for 4 stars and up)',
-        example: 4,
-      }),
-    minPrice: z.coerce
-      .number()
-      .int()
-      .nonnegative()
-      .optional()
-      .openapi({ param: { name: 'minPrice', in: 'query' } }),
-    maxPrice: z.coerce
-      .number()
-      .int()
-      .nonnegative()
-      .optional()
-      .openapi({ param: { name: 'maxPrice', in: 'query' } }),
-    specs: ProductSpecFiltersQueryParamSchema,
-    q: SearchQueryParamSchema,
-  })
-  .refine((q) => !(q.categorySlug !== undefined && q.categoryId !== undefined), {
-    path: ['categoryId'],
-    message: 'Provide at most one of categorySlug or categoryId',
-  });
+  minPrice: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .openapi({ param: { name: 'minPrice', in: 'query' } }),
+  maxPrice: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .openapi({ param: { name: 'maxPrice', in: 'query' } }),
+  specs: ProductSpecFiltersQueryParamSchema,
+  q: SearchQueryParamSchema,
+}).refine((q) => !(q.categorySlug !== undefined && q.categoryId !== undefined), {
+  path: ['categoryId'],
+  message: 'Provide at most one of categorySlug or categoryId',
+});
 
 export type ListProductsQuery = z.infer<typeof ListProductsQuerySchema>;
 
@@ -491,11 +483,16 @@ export const GetProductDetailQuerySchema = z.object({
 
 export type GetProductDetailQuery = z.infer<typeof GetProductDetailQuerySchema>;
 
+/** RFC 8594 deprecation window for the `slugs` compare parameter. */
+export const COMPARE_SLUGS_REMOVAL_DATE = '26 Feb 2027';
+export const COMPARE_SLUGS_SUNSET_HTTP_DATE = `Fri, ${COMPARE_SLUGS_REMOVAL_DATE} 00:00:00 GMT`;
+
 export const CompareProductsQuerySchema = z
   .object({
     ids: z
       .string()
       .trim()
+      .max(2_000)
       .optional()
       .openapi({
         param: { name: 'ids', in: 'query' },
@@ -504,10 +501,15 @@ export const CompareProductsQuerySchema = z
     slugs: z
       .string()
       .trim()
+      .max(2_000)
       .optional()
       .openapi({
-        param: { name: 'slugs', in: 'query' },
-        description: 'Comma-separated 2..4 product slugs',
+        param: {
+          name: 'slugs',
+          in: 'query',
+          deprecated: true,
+        },
+        description: `Deprecated: comma-separated 2..4 product slugs. Use \`ids\` instead; removal is scheduled after ${COMPARE_SLUGS_REMOVAL_DATE}.`,
       }),
   })
   .refine((q) => (q.ids !== undefined) !== (q.slugs !== undefined), {

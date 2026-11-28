@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { createApp } from '@/app.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
 import { ArticleDetailEnvelopeSchema } from '@/modules/articles/articles.schema.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { CategoryEnvelopeSchema, SitemapResponseSchema } from '@/modules/catalog/catalog.schema.ts';
 import { createCatalogService } from '@/modules/catalog/catalog.service.ts';
 import {
+  COMPARE_SLUGS_SUNSET_HTTP_DATE,
   CompareProductsEnvelopeSchema,
   ProductCursorPageSchema,
   ProductDetailEnvelopeSchema,
@@ -434,6 +436,8 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
       `/v1/products/compare?ids=${prod1.id},${prod2.id}`,
     );
     expect(compareByIdsRes.status).toBe(200);
+    expect(compareByIdsRes.headers.get('Deprecation')).toBeNull();
+    expect(compareByIdsRes.headers.get('Sunset')).toBeNull();
     const comparedByIds = CompareProductsEnvelopeSchema.parse(await compareByIdsRes.json()).data;
     expect(comparedByIds.specSchema).toHaveLength(3);
     expect(comparedByIds.products[0]?.id).toBe(prod1.id);
@@ -444,6 +448,8 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
       `/v1/products/compare?slugs=${prod2.slug},${prod1.slug}`,
     );
     expect(compareRes.status).toBe(200);
+    expect(compareRes.headers.get('Deprecation')).toBe('true');
+    expect(compareRes.headers.get('Sunset')).toBe(COMPARE_SLUGS_SUNSET_HTTP_DATE);
     const compared = CompareProductsEnvelopeSchema.parse(await compareRes.json()).data;
     expect(compared.specSchema).toHaveLength(3);
     expect(compared.products[0]?.slug).toBe(prod2.slug);
@@ -544,5 +550,40 @@ describe('Products HTTP & cross-module integration (/v1/products, /compare, /art
     expect(
       (await testApp.request(`/v1/products?sort=rating_desc&cursor=${overflowCursor}`)).status,
     ).toBe(422);
+  });
+
+  test('OpenAPI marks the compare slugs parameter as deprecated', async () => {
+    const { testApp } = await setupApp();
+    const response = await testApp.request('/v1/openapi.json');
+    expect(response.status).toBe(200);
+
+    const specSchema = z.object({
+      paths: z.record(
+        z.string(),
+        z.object({
+          get: z
+            .object({
+              parameters: z
+                .array(z.object({ name: z.string(), deprecated: z.boolean().optional() }))
+                .optional(),
+            })
+            .optional(),
+        }),
+      ),
+    });
+    const { paths } = specSchema.parse(await response.json());
+    const parameters = paths['/v1/products/compare']?.get?.parameters ?? [];
+    expect(parameters.find((param) => param.name === 'slugs')?.deprecated).toBe(true);
+    expect(parameters.find((param) => param.name === 'ids')?.deprecated).toBeUndefined();
+  });
+
+  test('exposes Deprecation and Sunset headers to allowed CORS origins', async () => {
+    const { testApp } = await setupApp();
+    const response = await testApp.request('/health', {
+      headers: { Origin: 'http://localhost:3000' },
+    });
+    const exposed = response.headers.get('Access-Control-Expose-Headers') ?? '';
+    expect(exposed).toContain('Deprecation');
+    expect(exposed).toContain('Sunset');
   });
 });

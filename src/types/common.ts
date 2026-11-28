@@ -1,5 +1,5 @@
-import type { DateRangeFilter, DecodedCursor } from '@/lib/pagination.ts';
-import type { RecordStatus } from '@/lib/status.ts';
+import type { DateRangeFilter, DecodedCursor } from '@/lib/api/pagination.ts';
+import type { RecordStatus } from '@/lib/api/status.ts';
 
 export interface TimestampedRecord {
   readonly createdAt: Date;

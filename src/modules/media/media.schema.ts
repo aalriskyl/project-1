@@ -1,6 +1,10 @@
 import { z } from '@hono/zod-openapi';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_UPLOAD_BYTES, MEDIA_FOLDERS } from '@/lib/storage.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MEDIA_FOLDERS,
+} from '@/lib/integrations/storage.ts';
 
 export const RequestUploadUrlBodySchema = z
   .strictObject({

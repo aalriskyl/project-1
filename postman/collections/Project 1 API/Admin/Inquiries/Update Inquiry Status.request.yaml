@@ -1,0 +1,24 @@
+$kind: http-request
+method: PATCH
+url: '{{baseUrl}}/v1/admin/inquiries/:id'
+order: 2000
+pathVariables:
+  - key: id
+    value: 01936c8e-7f2a-7000-8000-000000000401
+    description: Inquiry UUID from the Submit RFQ response or list
+body:
+  type: json
+  content: |-
+    {
+      "status": "contacted"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns the updated status', () => {
+        pm.expect(pm.response.json().data.status).to.eql('contacted');
+      });

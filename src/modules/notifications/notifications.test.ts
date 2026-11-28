@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import pino from 'pino';
-import { encryptMail, decryptMail } from '@/lib/mail-outbox-crypto.ts';
-import { createMailProvider } from '@/lib/mailer.ts';
+import { encryptMail, decryptMail } from '@/lib/integrations/mail-outbox-crypto.ts';
+import { createMailProvider } from '@/lib/integrations/mailer.ts';
 import { createNotificationsService } from '@/modules/notifications/notifications.service.ts';
 import type { NotificationsRepository } from '@/modules/notifications/notifications.repository.ts';
 import type { MailOutboxRow } from '@/db/schema/mail-outbox.ts';
@@ -39,6 +39,7 @@ describe('Durable password-reset delivery', () => {
     const finished: string[] = [];
     const keys: (string | undefined)[] = [];
     const repo: NotificationsRepository = {
+      enqueue: () => Promise.resolve(),
       claim: () => Promise.resolve(row),
       retry(_id, _lease, next) {
         retries.push(next);
@@ -57,6 +58,9 @@ describe('Durable password-reset delivery', () => {
         sendPasswordResetEmail(input) {
           keys.push(input.idempotencyKey);
           return fail ? Promise.reject(new Error('provider failure')) : Promise.resolve();
+        },
+        sendInquiryEmail() {
+          return Promise.resolve();
         },
       },
       key,

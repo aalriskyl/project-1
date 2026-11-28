@@ -3,7 +3,7 @@ import type { Database } from '@/db/client.ts';
 import { productReviews } from '@/db/schema/product-reviews.ts';
 import { products } from '@/db/schema/products.ts';
 import type { SeededReviewsResult } from '@/db/seeders/types.ts';
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 
 interface SeedReviewSpec {
   readonly productKey: string;

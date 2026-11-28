@@ -1,7 +1,10 @@
-import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
+import { OpenAPIHono } from '@hono/zod-openapi';
+import { createNamedRoute } from '@/lib/api/openapi.ts';
+
+const createRoute = createNamedRoute('auth');
 import type { MiddlewareHandler } from 'hono';
-import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/errors.ts';
-import { ok } from '@/lib/response.ts';
+import { defaultOpenApiHook, ErrorResponseSchema } from '@/lib/shared/errors.ts';
+import { ok } from '@/lib/api/response.ts';
 import {
   AuthSessionEnvelopeSchema,
   ChangePasswordBodySchema,
@@ -16,7 +19,7 @@ import {
 } from '@/modules/auth/auth.schema.ts';
 import type { AuthService } from '@/modules/auth/auth.service.ts';
 import type { AppEnv } from '@/types/app.ts';
-import { getRequiredUser, requireAuth } from '@/middlewares/auth.ts';
+import { getRequiredUser, requireAuth } from '@/middlewares/auth/auth.ts';
 
 const registerRoute = createRoute({
   method: 'post',

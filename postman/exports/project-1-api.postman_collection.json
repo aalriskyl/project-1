@@ -24,6 +24,63 @@
   ],
   "item": [
     {
+      "name": "Inquiries",
+      "item": [
+        {
+          "name": "Submit RFQ (Pre Order)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Returns an inquiry receipt', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.data.status).to.eql('new');",
+                  "  pm.expect(json.data.id).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}",
+                "type": "text",
+                "description": "Unique retry key; repeat requests with the same value return the original receipt"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": null,\n  \"name\": \"Andi Saputra\",\n  \"email\": \"andi@example.com\",\n  \"phone\": \"+628123456789\",\n  \"message\": \"Saya ingin penawaran harga genset 30 kVA untuk proyek industri.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/inquiries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "inquiries"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "System",
       "description": "Liveness, database readiness, and OpenAPI specification endpoints.",
       "auth": {
@@ -1141,6 +1198,105 @@
                 }
               },
               "response": []
+            },
+            {
+              "name": "Get Structured Data",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 OK', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns a schema.org graph', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.data['@context']).to.eql('https://schema.org');",
+                      "  pm.expect(json.data['@graph']).to.be.an('array').that.is.not.empty;",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/seo/structured-data?type=product&slug=genset-30-kva-silent-perkins",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "seo",
+                    "structured-data"
+                  ],
+                  "query": [
+                    {
+                      "key": "type",
+                      "value": "product",
+                      "description": "Entity type (product, category or article)"
+                    },
+                    {
+                      "key": "slug",
+                      "value": "genset-30-kva-silent-perkins",
+                      "description": "Slug of the published entity"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get Permanent Slug Redirect",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200 or 404', () => {",
+                      "  pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                      "});",
+                      "pm.test('Returns a permanent target when found', () => {",
+                      "  if (pm.response.code !== 200) return;",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.data.permanent).to.be.true;",
+                      "  pm.expect(json.data.newSlug).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/seo/redirect?type=product&slug=old-product-slug",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "seo",
+                    "redirect"
+                  ],
+                  "query": [
+                    {
+                      "key": "type",
+                      "value": "product",
+                      "description": "Entity type (product, category or article)"
+                    },
+                    {
+                      "key": "slug",
+                      "value": "old-product-slug",
+                      "description": "Old slug to resolve; returns 404 when no redirect is registered"
+                    }
+                  ]
+                }
+              },
+              "response": []
             }
           ]
         }
@@ -1148,7 +1304,7 @@
     },
     {
       "name": "Products",
-      "description": "Zero-join product cards, SKU/FTS search, single-row detail with optional includes, and batched /compare.",
+      "description": "Zero-join product cards, SKU/FTS search, detail by slug or stable UUID (by-id), optional includes, and batched /compare (?ids= preferred, ?slugs= deprecated).",
       "auth": {
         "type": "noauth"
       },
@@ -1317,6 +1473,52 @@
           "response": []
         },
         {
+          "name": "Get Product By ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 OK', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns the requested product detail', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.success).to.eql(true);",
+                  "  pm.expect(json.data.id).to.eql(pm.environment.get('productId'));",
+                  "  pm.expect(json.data.slug).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/products/by-id/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "products",
+                "by-id",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{productId}}"
+                }
+              ]
+            },
+            "description": "Stable UUID lookup for clients that already have an id from list responses or RFQs. Use this instead of re-resolving by slug."
+          },
+          "response": []
+        },
+        {
           "name": "Compare Products",
           "event": [
             {
@@ -1354,12 +1556,12 @@
                 {
                   "key": "ids",
                   "value": "{{productId}},{{sparepartProductId}}",
-                  "description": "Comma-separated 2..4 product UUIDs (mutually exclusive with slugs)"
+                  "description": "Preferred - comma-separated 2..4 product UUIDs (mutually exclusive with slugs)"
                 },
                 {
                   "key": "slugs",
                   "value": "genset-30-kva-silent-diesel-tsuzumi-tpg30,genset-50-kva-silent-diesel-tsuzumi-tpg50",
-                  "description": "Optional alternative: comma-separated 2..4 product slugs (for shareable URLs)",
+                  "description": "Deprecated - comma-separated 2..4 product slugs. Use ids instead; removed after 26 Feb 2027. Responses carry Deprecation and Sunset headers.",
                   "disabled": true
                 }
               ]
@@ -1849,6 +2051,113 @@
       "name": "Admin",
       "description": "Backoffice CRUD endpoints requiring BearerAuth with role === 'admin'.",
       "item": [
+        {
+          "name": "Inquiries",
+          "item": [
+            {
+              "name": "List Inquiries",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns a paginated queue', () => {",
+                      "  const json = pm.response.json();",
+                      "  pm.expect(json.data).to.be.an('array');",
+                      "  pm.expect(json.meta.mode).to.be.a('string');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/inquiries?limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "inquiries"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "description": "Page size (1-100)"
+                    },
+                    {
+                      "key": "status",
+                      "value": "new",
+                      "description": "Filter by new, contacted or closed",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Inquiry Status",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status code is 200', () => {",
+                      "  pm.response.to.have.status(200);",
+                      "});",
+                      "pm.test('Returns the updated status', () => {",
+                      "  pm.expect(pm.response.json().data.status).to.eql('contacted');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"contacted\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/admin/inquiries/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "admin",
+                    "inquiries",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "01936c8e-7f2a-7000-8000-000000000401",
+                      "description": "Inquiry UUID from the Submit RFQ response or list"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
         {
           "name": "Categories",
           "description": "Admin category and taxonomy CRUD endpoints.",

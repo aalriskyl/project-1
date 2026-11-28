@@ -1,22 +1,23 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
+import { AssetImageUrlSchema } from '@/lib/shared/asset-url.ts';
 import {
   AdminPaginationQuerySchema,
   CreatedFromQuerySchema,
   CreatedToQuerySchema,
   createCursorPageSchema,
+  CursorPaginationQuerySchema,
   QueryBooleanSchema,
-} from '@/lib/pagination.ts';
-import { AuthorSummaryRefSchema, CategorySummaryRefSchema } from '@/lib/relations.ts';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { SearchQueryParamSchema } from '@/lib/search.ts';
+} from '@/lib/api/pagination.ts';
+import { AuthorSummaryRefSchema, CategorySummaryRefSchema } from '@/lib/shared/relations.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import { SearchQueryParamSchema } from '@/lib/api/search.ts';
 import {
   SeoMetadataCreateFields,
   SeoMetadataResponseFields,
   SeoMetadataUpdateFields,
-} from '@/lib/seo.ts';
-import { createSlugSchema } from '@/lib/slug.ts';
-import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
+} from '@/lib/shared/seo.ts';
+import { createSlugSchema } from '@/lib/shared/slug.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/api/status.ts';
 
 const ArticleSlugSchema = createSlugSchema(280);
 
@@ -79,12 +80,7 @@ export const ArticleDetailSchema = ArticleSummarySchema.extend({
 
 export type ArticleDetail = z.infer<typeof ArticleDetailSchema>;
 
-export const ListArticlesQuerySchema = z.object({
-  cursor: z
-    .string()
-    .min(1)
-    .optional()
-    .openapi({ param: { name: 'cursor', in: 'query' } }),
+export const ListArticlesQuerySchema = CursorPaginationQuerySchema.extend({
   limit: z.coerce
     .number()
     .int()

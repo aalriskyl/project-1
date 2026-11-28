@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, lte, notExists, or } from 'drizzle-orm';
 import type { Database } from '@/db/client.ts';
 import { mediaReferences, type MediaUploadRow, mediaUploads } from '@/db/schema/media-uploads.ts';
-import { lockMediaLifecycle } from '@/modules/media/media-attachments.repository.ts';
+import { lockMediaEntity, lockOrphanSweep } from '@/modules/media/media-attachments.repository.ts';
 
 const ORPHAN_CLAIM_LEASE_MS = 15 * 60 * 1_000;
 
@@ -22,7 +22,9 @@ export interface MediaRepository {
     readonly olderThan: Date;
     readonly limit: number;
   }): Promise<readonly MediaUploadRow[]>;
-  releaseOrphanClaims(ids: readonly string[]): Promise<void>;
+  releaseOrphanClaims(
+    claims: readonly { readonly id: string; readonly deletingAt: Date }[],
+  ): Promise<void>;
   markDeletedByIds(ids: readonly string[], deletedAt: Date): Promise<void>;
 }
 export function createMediaRepository(db: Database): MediaRepository {
@@ -38,7 +40,7 @@ export function createMediaRepository(db: Database): MediaRepository {
     },
     async markVerified(id, verifiedAt) {
       return db.transaction(async (tx) => {
-        await lockMediaLifecycle(tx);
+        await lockMediaEntity(tx, 'uploads', id);
         const [row] = await tx
           .update(mediaUploads)
           .set({ verifiedAt })
@@ -55,7 +57,7 @@ export function createMediaRepository(db: Database): MediaRepository {
     },
     async claimOrphans({ olderThan, limit }) {
       return db.transaction(async (tx) => {
-        await lockMediaLifecycle(tx);
+        await lockOrphanSweep(tx);
         const now = new Date();
         const staleClaimCutoff = new Date(now.getTime() - ORPHAN_CLAIM_LEASE_MS);
         const rows = await tx
@@ -76,25 +78,58 @@ export function createMediaRepository(db: Database): MediaRepository {
           )
           .orderBy(asc(mediaUploads.createdAt), asc(mediaUploads.id))
           .limit(limit);
-        if (rows.length > 0)
+        if (rows.length === 0) return [];
+
+        // Same per-upload lock the attachment path uses. Re-check references and
+        // lease state under the lock so an in-flight attachment cannot be deleted.
+        for (const row of rows) {
+          await lockMediaEntity(tx, 'uploads', row.id);
+        }
+        const stillOrphaned = await tx
+          .select({ id: mediaUploads.id })
+          .from(mediaUploads)
+          .where(
+            and(
+              inArray(
+                mediaUploads.id,
+                rows.map((r) => r.id),
+              ),
+              isNull(mediaUploads.deletedAt),
+              or(isNull(mediaUploads.deletingAt), lte(mediaUploads.deletingAt, staleClaimCutoff)),
+              notExists(
+                tx
+                  .select({ id: mediaReferences.uploadId })
+                  .from(mediaReferences)
+                  .where(eq(mediaReferences.uploadId, mediaUploads.id)),
+              ),
+            ),
+          );
+        const claimableIds = new Set(stillOrphaned.map((row) => row.id));
+        const claimable = rows.filter((row) => claimableIds.has(row.id));
+        if (claimable.length > 0)
           await tx
             .update(mediaUploads)
             .set({ deletingAt: now })
             .where(
               inArray(
                 mediaUploads.id,
-                rows.map((r) => r.id),
+                claimable.map((r) => r.id),
               ),
             );
-        return rows;
+        return claimable.map((row) => ({ ...row, deletingAt: now }));
       });
     },
-    async releaseOrphanClaims(ids) {
-      if (ids.length > 0)
-        await db
-          .update(mediaUploads)
-          .set({ deletingAt: null })
-          .where(and(inArray(mediaUploads.id, [...ids]), isNull(mediaUploads.deletedAt)));
+    async releaseOrphanClaims(claims) {
+      if (claims.length === 0) return;
+      // Compare-and-swap on the exact lease timestamp so a sweep cannot clear a
+      // lease that a later sweep has already re-claimed.
+      const matchClaims = claims.map((claim) =>
+        and(eq(mediaUploads.id, claim.id), eq(mediaUploads.deletingAt, claim.deletingAt)),
+      );
+      await db
+        .update(mediaUploads)
+        .set({ deletingAt: null })
+        .where(and(isNull(mediaUploads.deletedAt), or(...matchClaims)));
     },
     async markDeletedByIds(ids, deletedAt) {
       if (ids.length > 0)

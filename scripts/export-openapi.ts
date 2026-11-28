@@ -1,6 +1,6 @@
 import { app } from '../src/app.ts';
 import { closeDb } from '../src/db/client.ts';
-import { closeRedis } from '../src/lib/redis.ts';
+import { closeRedis } from '../src/lib/integrations/redis.ts';
 
 const path = 'postman/specs/openapi.json';
 try {
@@ -23,6 +23,6 @@ try {
     console.log(`Updated ${path}`);
   }
 } finally {
-  closeRedis();
+  await closeRedis();
   await closeDb();
 }

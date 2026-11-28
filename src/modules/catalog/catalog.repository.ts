@@ -9,9 +9,9 @@ import {
   buildDescCursorCondition,
   buildStatusFilterConditions,
   isUniqueViolation,
-} from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
-import { buildFuzzyRelevanceScoreSql, buildFuzzySearchCondition } from '@/lib/search.ts';
+} from '@/lib/shared/db-helpers.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
+import { buildFuzzyRelevanceScoreSql, buildFuzzySearchCondition } from '@/lib/api/search.ts';
 import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
 import type {
   AdminListFilter,
@@ -137,6 +137,8 @@ export function createCatalogRepository(db: Database): CatalogRepository {
     return conditions;
   }
 
+  const MAX_ACTIVE_CATEGORIES = 500;
+
   return {
     async listActive(filter?: {
       readonly query?: string;
@@ -169,7 +171,8 @@ export function createCatalogRepository(db: Database): CatalogRepository {
           asc(categories.sortOrder),
           asc(categories.name),
           asc(categories.id),
-        );
+        )
+        .limit(MAX_ACTIVE_CATEGORIES);
     },
 
     async listAdminCursor({
@@ -320,7 +323,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
 
     async create(input: CreateCategoryRecord): Promise<CategoryRow> {
       try {
-        return await withMediaMutation(db, 'categories', async (tx) => {
+        return await withMediaMutation(db, 'categories', input.id, async (tx) => {
           const [created] = await tx
             .insert(categories)
             .values({
@@ -362,7 +365,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
 
     async updateById(id: string, patch: UpdateCategoryRecord): Promise<CategoryRow | null> {
       try {
-        return await withMediaMutation(db, 'categories', async (tx) => {
+        return await withMediaMutation(db, 'categories', id, async (tx) => {
           const [updated] = await tx
             .update(categories)
             .set({
@@ -385,7 +388,7 @@ export function createCatalogRepository(db: Database): CatalogRepository {
     },
 
     async softDeleteById(id: string, deletedAt: Date): Promise<boolean> {
-      const deleted = await withMediaMutation(db, 'categories', async (tx) => {
+      const deleted = await withMediaMutation(db, 'categories', id, async (tx) => {
         const [row] = await tx
           .update(categories)
           .set({ isActive: false, deletedAt, updatedAt: new Date() })

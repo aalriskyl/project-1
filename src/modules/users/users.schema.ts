@@ -4,10 +4,10 @@ import {
   CreatedFromQuerySchema,
   CreatedToQuerySchema,
   createCursorPageSchema,
-} from '@/lib/pagination.ts';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { SearchQueryParamSchema } from '@/lib/search.ts';
-import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
+} from '@/lib/api/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import { SearchQueryParamSchema } from '@/lib/api/search.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/api/status.ts';
 import { USER_ROLES } from '@/types/app.ts';
 
 export const PhoneE164Schema = z

@@ -1,13 +1,17 @@
-import { generateId } from '@/lib/id.ts';
+import { generateId } from '@/lib/auth/id.ts';
 import { env } from '@/config/env.ts';
 import {
   ConflictError,
   NotFoundError,
   ServiceUnavailableError,
   ValidationError,
-} from '@/lib/errors.ts';
-import { type SignedUploadResult, type StorageProvider, storageProvider } from '@/lib/storage.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+} from '@/lib/shared/errors.ts';
+import {
+  type SignedUploadResult,
+  type StorageProvider,
+  storageProvider,
+} from '@/lib/integrations/storage.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type { MediaRepository } from '@/modules/media/media.repository.ts';
 import type {
   CleanupOrphansBody,
@@ -114,10 +118,13 @@ export function createMediaService(
         try {
           await provider.deleteObjects(bucket, orphanPaths);
         } catch (err) {
-          const remainingIds = candidates
+          const remainingClaims = candidates
             .filter((c) => !deletedPaths.includes(c.objectPath))
-            .map((c) => c.id);
-          await mediaRepo.releaseOrphanClaims(remainingIds);
+            .map((c) => ({ id: c.id, deletingAt: c.deletingAt }))
+            .filter(
+              (claim): claim is { id: string; deletingAt: Date } => claim.deletingAt !== null,
+            );
+          await mediaRepo.releaseOrphanClaims(remainingClaims);
           throw err;
         }
 

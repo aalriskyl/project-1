@@ -1,19 +1,19 @@
 import { env } from '@/config/env.ts';
-import { generateOpaqueToken, hashTokenSha256 } from '@/lib/crypto.ts';
+import { generateOpaqueToken, hashTokenSha256 } from '@/lib/auth/crypto.ts';
 import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
   ServiceUnavailableError,
   UnauthorizedError,
-} from '@/lib/errors.ts';
-import { type GoogleTokenVerifier, googleTokenVerifier } from '@/lib/google-oauth.ts';
-import { generateId } from '@/lib/id.ts';
-import { type JwtConfig, signAccessToken } from '@/lib/jwt.ts';
-import { encryptMail } from '@/lib/mail-outbox-crypto.ts';
-import { type MailProvider } from '@/lib/mailer.ts';
-import { hashPassword, verifyAgainstDummyPassword, verifyPassword } from '@/lib/password.ts';
-import { isRecordActive } from '@/lib/status.ts';
+} from '@/lib/shared/errors.ts';
+import { type GoogleTokenVerifier, googleTokenVerifier } from '@/lib/integrations/google-oauth.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { type JwtConfig, signAccessToken } from '@/lib/auth/jwt.ts';
+import { encryptMail } from '@/lib/integrations/mail-outbox-crypto.ts';
+import { type MailProvider } from '@/lib/integrations/mailer.ts';
+import { hashPassword, verifyAgainstDummyPassword, verifyPassword } from '@/lib/auth/password.ts';
+import { isRecordActive } from '@/lib/api/status.ts';
 import type { AuthRepository, NewRefreshTokenInput } from '@/modules/auth/auth.repository.ts';
 import type {
   AuthSession,
@@ -212,17 +212,33 @@ export function createAuthService(
         refreshTokenTtlSec,
       );
 
-      const createdUser = await authRepo.createUserWithRefreshToken({
-        user: {
-          id: userId,
-          email: identity.email,
-          passwordHash: null,
-          googleSub: identity.sub,
-          displayName: identity.displayName,
-          role: 'user',
-        },
-        refreshToken: record,
-      });
+      let createdUser;
+      try {
+        createdUser = await authRepo.createUserWithRefreshToken({
+          user: {
+            id: userId,
+            email: identity.email,
+            passwordHash: null,
+            googleSub: identity.sub,
+            displayName: identity.displayName,
+            role: 'user',
+          },
+          refreshToken: record,
+        });
+      } catch (err: unknown) {
+        // Two simultaneous first-time logins can race on the unique google_sub
+        // index. The loser should receive a session for the winner's account.
+        if (!(err instanceof ConflictError) || err.code !== 'EMAIL_ALREADY_EXISTS') throw err;
+        const winner = await authRepo.findUserByGoogleSub(identity.sub);
+        if (winner === null) throw err;
+        if (!isRecordActive(winner)) {
+          throw new ForbiddenError('This account has been deactivated', 'ACCOUNT_INACTIVE');
+        }
+        const retryFamilyId = generateId();
+        const retryToken = buildRefreshTokenCandidate(winner.id, retryFamilyId, refreshTokenTtlSec);
+        await authRepo.insertRefreshToken(retryToken.record);
+        return buildSessionResponse(winner, retryToken.rawRefreshToken);
+      }
 
       return buildSessionResponse(createdUser, rawRefreshToken);
     },
@@ -401,6 +417,12 @@ export function createAuthService(
       });
 
       if (!rotated) {
+        // A concurrent refresh with the same token can win the conditional update.
+        // Treat that as an idempotent retry instead of revoking the winner's session.
+        const latest = await authRepo.findRefreshTokenStateById(found.token.id);
+        if (latest?.revokedAt !== null && latest?.replacedByTokenId !== null) {
+          throw new UnauthorizedError('Refresh token already rotated', 'INVALID_REFRESH_TOKEN');
+        }
         await authRepo.revokeTokenFamily(found.token.familyId, now);
         throw new UnauthorizedError(
           'Refresh token reuse detected; session revoked',

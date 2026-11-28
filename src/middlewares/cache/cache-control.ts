@@ -1,0 +1,78 @@
+import { createMiddleware } from 'hono/factory';
+import { computeWeakEtag } from '@/lib/auth/crypto.ts';
+import type { AppEnv } from '@/types/app.ts';
+
+export interface PublicCacheOptions {
+  readonly maxAgeSec: number;
+  readonly sMaxAgeSec?: number;
+  readonly staleWhileRevalidateSec?: number;
+  /** Bodies above this size keep Cache-Control but skip the hashing/clone cost. */
+  readonly maxEtagBodyBytes?: number;
+}
+
+const DEFAULT_MAX_ETAG_BODY_BYTES = 256 * 1024;
+
+function buildCacheControlDirective(options: PublicCacheOptions): string {
+  const directives = [`public`, `max-age=${options.maxAgeSec}`];
+  if (options.sMaxAgeSec !== undefined) {
+    directives.push(`s-maxage=${options.sMaxAgeSec}`);
+  }
+  if (options.staleWhileRevalidateSec !== undefined) {
+    directives.push(`stale-while-revalidate=${options.staleWhileRevalidateSec}`);
+  }
+  return directives.join(', ');
+}
+
+function stripWeakPrefix(tag: string): string {
+  return tag.startsWith('W/') ? tag.slice(2) : tag;
+}
+
+function matchesIfNoneMatch(headerValue: string, etag: string): boolean {
+  const trimmed = headerValue.trim();
+  if (trimmed === '*') {
+    return true;
+  }
+  const normalizedTarget = stripWeakPrefix(etag);
+  return trimmed
+    .split(',')
+    .some((candidate) => stripWeakPrefix(candidate.trim()) === normalizedTarget);
+}
+
+/**
+ * Sets `Cache-Control` and weak `ETag` headers on successful GET/HEAD responses,
+ * returning `304 Not Modified` when `If-None-Match` matches.
+ */
+export function publicCache(options: PublicCacheOptions) {
+  const cacheControlValue = buildCacheControlDirective(options);
+
+  return createMiddleware<AppEnv>(async (c, next) => {
+    await next();
+
+    const method = c.req.method;
+    if ((method !== 'GET' && method !== 'HEAD') || c.res.status !== 200) {
+      return;
+    }
+
+    c.res.headers.set('Cache-Control', cacheControlValue);
+
+    const contentLength = Number(c.res.headers.get('Content-Length') ?? '0');
+    if (contentLength > (options.maxEtagBodyBytes ?? DEFAULT_MAX_ETAG_BODY_BYTES)) {
+      return;
+    }
+
+    const cloned = c.res.clone();
+    const bodyText = await cloned.text();
+    const etag = computeWeakEtag(bodyText);
+    c.res.headers.set('ETag', etag);
+
+    const ifNoneMatch = c.req.header('if-none-match');
+    if (ifNoneMatch !== undefined && matchesIfNoneMatch(ifNoneMatch, etag)) {
+      const headers = new Headers(c.res.headers);
+      headers.delete('Content-Length');
+      c.res = new Response(null, {
+        status: 304,
+        headers,
+      });
+    }
+  });
+}

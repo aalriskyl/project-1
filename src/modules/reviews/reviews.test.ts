@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createApp } from '@/app.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
 import { createArticlesService } from '@/modules/articles/articles.service.ts';
 import { createAuthService } from '@/modules/auth/auth.service.ts';
 import { CategoryEnvelopeSchema } from '@/modules/catalog/catalog.schema.ts';

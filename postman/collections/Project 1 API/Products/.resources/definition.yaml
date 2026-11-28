@@ -1,6 +1,6 @@
 $kind: collection
 name: Products
-description: Zero-join product cards, SKU/FTS search, single-row detail with optional includes, and batched /compare.
+description: Zero-join product cards, SKU/FTS search, detail by slug or stable UUID (by-id), optional includes, and batched /compare (?ids= preferred, ?slugs= deprecated).
 order: 4500
 auth:
   type: noauth

@@ -1,0 +1,24 @@
+$kind: http-request
+method: GET
+url: '{{baseUrl}}/v1/admin/inquiries?limit=20'
+order: 1000
+queryParams:
+  - key: limit
+    value: '20'
+    description: Page size (1-100)
+  - key: status
+    value: new
+    disabled: true
+    description: Filter by new, contacted or closed
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test('Status code is 200', () => {
+        pm.response.to.have.status(200);
+      });
+      pm.test('Returns a paginated queue', () => {
+        const json = pm.response.json();
+        pm.expect(json.data).to.be.an('array');
+        pm.expect(json.meta.mode).to.be.a('string');
+      });

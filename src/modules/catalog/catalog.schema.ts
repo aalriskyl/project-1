@@ -1,19 +1,19 @@
 import { z } from '@hono/zod-openapi';
-import { AssetImageUrlSchema } from '@/lib/asset-url.ts';
+import { AssetImageUrlSchema } from '@/lib/shared/asset-url.ts';
 import {
   AdminPaginationQuerySchema,
   createCursorPageSchema,
   QueryBooleanSchema,
-} from '@/lib/pagination.ts';
-import { createSuccessEnvelopeSchema } from '@/lib/response.ts';
-import { SearchQueryParamSchema } from '@/lib/search.ts';
+} from '@/lib/api/pagination.ts';
+import { createSuccessEnvelopeSchema } from '@/lib/api/response.ts';
+import { SearchQueryParamSchema } from '@/lib/api/search.ts';
 import {
   SeoMetadataCreateFields,
   SeoMetadataResponseFields,
   SeoMetadataUpdateFields,
-} from '@/lib/seo.ts';
-import { createSlugSchema } from '@/lib/slug.ts';
-import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/status.ts';
+} from '@/lib/shared/seo.ts';
+import { createSlugSchema } from '@/lib/shared/slug.ts';
+import { RecordStatusSchema, StatusFilterQueryParamSchema } from '@/lib/api/status.ts';
 
 export const SpecFieldTypeSchema = z.enum(['number', 'text', 'boolean']);
 

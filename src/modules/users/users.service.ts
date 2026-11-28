@@ -1,10 +1,10 @@
-import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
-import { type CursorPage, paginateAdminList } from '@/lib/pagination.ts';
-import { hashPassword } from '@/lib/password.ts';
-import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
-import type { ActiveSessionUserState } from '@/middlewares/auth.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+import { ConflictError, ForbiddenError, NotFoundError } from '@/lib/shared/errors.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { type CursorPage, paginateAdminList } from '@/lib/api/pagination.ts';
+import { hashPassword } from '@/lib/auth/password.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/api/status.ts';
+import type { ActiveSessionUserState } from '@/middlewares/auth/auth.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type { UserEntity, UsersRepository } from '@/modules/users/users.repository.ts';
 import type {
   CreateAdminUserBody,
@@ -215,7 +215,7 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
       }
 
       const now = new Date();
-      await usersRepo.adminUpdateById(
+      const updated = await usersRepo.adminUpdateById(
         targetUserId,
         {
           isActive: false,
@@ -223,6 +223,9 @@ export function createUsersService(usersRepo: UsersRepository): UsersService {
         },
         now,
       );
+      if (updated === null) {
+        throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+      }
     },
   };
 }

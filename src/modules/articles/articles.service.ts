@@ -1,21 +1,28 @@
-import { NotFoundError } from '@/lib/errors.ts';
-import { generateId } from '@/lib/id.ts';
+import { type ResponseCache, noopCache } from '@/lib/cache/cache.ts';
+import { sanitizeMarkdown } from '@/lib/shared/markdown.ts';
+import { NotFoundError } from '@/lib/shared/errors.ts';
+import { generateId } from '@/lib/auth/id.ts';
 import {
   buildCursorPage,
   type CursorPage,
   decodeCursor,
   encodeCursor,
   paginateAdminList,
-} from '@/lib/pagination.ts';
-import { type RevalidateNotifier, revalidateNotifier } from '@/lib/revalidate.ts';
-import { slugify } from '@/lib/slug.ts';
-import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/status.ts';
-import { assertAdminUser } from '@/middlewares/authorize.ts';
+} from '@/lib/api/pagination.ts';
+import { type RevalidateNotifier, revalidateNotifier } from '@/lib/integrations/revalidate.ts';
+import { slugify } from '@/lib/shared/slug.ts';
+import { isRecordActive, resolveActiveStateInput, toRecordStatus } from '@/lib/api/status.ts';
+import {
+  type RedirectRepository,
+  noopRedirectRepository,
+} from '@/modules/seo/redirects.repository.ts';
+import { assertAdminUser } from '@/middlewares/auth/authorize.ts';
 import type {
   ArticleDetailRow,
   ArticlesRepository,
   ArticleSummaryRow,
 } from '@/modules/articles/articles.repository.ts';
+import { ArticleDetailSchema } from '@/modules/articles/articles.schema.ts';
 import type {
   ArticleDetail,
   ArticleSummary,
@@ -29,6 +36,7 @@ import type {
 import type { AuthUser } from '@/types/app.ts';
 
 const RELATED_ARTICLES_LIMIT = 4;
+const ARTICLE_DETAIL_CACHE_TTL_SEC = 60;
 
 export type RelatedProductsResolver = (
   productIds: readonly string[],
@@ -83,9 +91,13 @@ export function createArticlesService(
   options: {
     readonly revalidator?: RevalidateNotifier;
     readonly resolveRelatedProducts?: RelatedProductsResolver;
+    readonly redirectsRepo?: RedirectRepository;
+    readonly cache?: ResponseCache;
   } = {},
 ): ArticlesService {
   const revalidator = options.revalidator ?? revalidateNotifier;
+  const redirectsRepo = options.redirectsRepo ?? noopRedirectRepository;
+  const cache = options.cache ?? noopCache;
   const hasRelatedProductsResolver = options.resolveRelatedProducts !== undefined;
   const resolveRelatedProducts = options.resolveRelatedProducts ?? emptyRelatedProductsResolver;
 
@@ -148,6 +160,12 @@ export function createArticlesService(
     },
 
     async getPublishedArticleBySlug(slug: string, query: GetArticleQuery): Promise<ArticleDetail> {
+      const cacheKey = `article:detail:${slug}:${query.includeRelated === true ? 'related' : 'plain'}`;
+      const cached = await cache.getJson(cacheKey, ArticleDetailSchema);
+      if (cached !== null) {
+        return cached;
+      }
+
       const article = await articlesRepo.findPublishedBySlug(slug);
       if (article === null) {
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
@@ -162,10 +180,15 @@ export function createArticlesService(
             })
           : undefined;
 
-      return serializeArticleDetail(article, {
+      const detail = await serializeArticleDetail(article, {
         ...(relatedArticles !== undefined ? { relatedArticles } : {}),
         filterPublicRelatedIds: true,
       });
+      await cache.setJson(cacheKey, detail, ARTICLE_DETAIL_CACHE_TTL_SEC, [
+        `article:${slug}`,
+        'products',
+      ]);
+      return detail;
     },
 
     async listAdminArticles(
@@ -223,7 +246,7 @@ export function createArticlesService(
         title: input.title,
         slug: resolvedSlug,
         excerpt: input.excerpt ?? null,
-        contentMd: input.contentMd,
+        contentMd: sanitizeMarkdown(input.contentMd),
         coverImageUrl: input.coverImageUrl ?? null,
         metaTitle: input.metaTitle ?? null,
         metaDescription: input.metaDescription ?? null,
@@ -239,6 +262,7 @@ export function createArticlesService(
         publishedAt,
       });
 
+      await redirectsRepo.claimSlug('article', created.slug);
       if (created.isPublished && isRecordActive(created)) {
         await revalidator.notify(['articles', `article:${created.slug}`, 'sitemap']);
       }
@@ -279,7 +303,7 @@ export function createArticlesService(
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.slug !== undefined ? { slug: input.slug } : {}),
         ...(input.excerpt !== undefined ? { excerpt: input.excerpt } : {}),
-        ...(input.contentMd !== undefined ? { contentMd: input.contentMd } : {}),
+        ...(input.contentMd !== undefined ? { contentMd: sanitizeMarkdown(input.contentMd) } : {}),
         ...(input.coverImageUrl !== undefined ? { coverImageUrl: input.coverImageUrl } : {}),
         ...(input.metaTitle !== undefined ? { metaTitle: input.metaTitle } : {}),
         ...(input.metaDescription !== undefined ? { metaDescription: input.metaDescription } : {}),
@@ -301,6 +325,9 @@ export function createArticlesService(
         throw new NotFoundError('Article not found', 'ARTICLE_NOT_FOUND');
       }
 
+      if (input.slug !== undefined && input.slug !== existing.slug) {
+        await redirectsRepo.recordSlugChange('article', existing.slug, updated.slug);
+      }
       await revalidator.notify([
         'articles',
         `article:${existing.slug}`,

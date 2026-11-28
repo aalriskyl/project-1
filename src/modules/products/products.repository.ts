@@ -30,9 +30,9 @@ import {
   buildDescCursorCondition,
   buildStatusFilterConditions,
   extractPostgresError,
-} from '@/lib/db-helpers.ts';
-import { ConflictError } from '@/lib/errors.ts';
-import { buildFuzzySearchCondition, escapeLikePattern } from '@/lib/search.ts';
+} from '@/lib/shared/db-helpers.ts';
+import { ConflictError } from '@/lib/shared/errors.ts';
+import { buildFuzzySearchCondition, escapeLikePattern } from '@/lib/api/search.ts';
 import { withMediaMutation } from '@/modules/media/media-attachments.repository.ts';
 import type {
   ProductSort,
@@ -484,7 +484,6 @@ export function createProductsRepository(db: Database): ProductsRepository {
         db
           .select({ total: sql<number>`count(*)::int` })
           .from(products)
-          .innerJoin(categories, eq(products.categoryId, categories.id))
           .where(whereClause),
       ]);
 
@@ -652,7 +651,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async create(input: CreateProductRecord): Promise<ProductRow> {
       try {
-        return await withMediaMutation(db, 'products', async (tx) => {
+        return await withMediaMutation(db, 'products', input.id, async (tx) => {
           const [created] = await tx
             .insert(products)
             .values({
@@ -699,7 +698,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
 
     async updateById(id: string, patch: UpdateProductRecord): Promise<ProductRow | null> {
       try {
-        return await withMediaMutation(db, 'products', async (tx) => {
+        return await withMediaMutation(db, 'products', id, async (tx) => {
           const [updated] = await tx
             .update(products)
             .set({
@@ -716,7 +715,7 @@ export function createProductsRepository(db: Database): ProductsRepository {
     },
 
     async softDeleteById(id: string, deletedAt: Date): Promise<boolean> {
-      const deleted = await withMediaMutation(db, 'products', async (tx) => {
+      const deleted = await withMediaMutation(db, 'products', id, async (tx) => {
         const [row] = await tx
           .update(products)
           .set({ isActive: false, deletedAt, updatedAt: new Date() })

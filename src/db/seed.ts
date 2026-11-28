@@ -6,7 +6,7 @@ import { seedProducts } from '@/db/seeders/products.seeder.ts';
 import { seedReviews } from '@/db/seeders/reviews.seeder.ts';
 import type { SeedSummary } from '@/db/seeders/types.ts';
 import { seedUsers } from '@/db/seeders/users.seeder.ts';
-import { logger } from '@/lib/logger.ts';
+import { logger } from '@/lib/logging/logger.ts';
 
 export type SeederName = 'users' | 'categories' | 'products' | 'articles' | 'reviews';
 

@@ -6,10 +6,10 @@ import postgres from 'postgres';
 import { createApp } from '@/app.ts';
 import type { Database } from '@/db/client.ts';
 import * as schema from '@/db/schema/index.ts';
-import { generateId } from '@/lib/id.ts';
-import { signAccessToken } from '@/lib/jwt.ts';
-import { createRedisRateLimitStore } from '@/lib/redis-rate-limit.ts';
-import type { StorageProvider } from '@/lib/storage.ts';
+import { generateId } from '@/lib/auth/id.ts';
+import { signAccessToken } from '@/lib/auth/jwt.ts';
+import { createRedisRateLimitStore } from '@/lib/integrations/redis-rate-limit.ts';
+import type { StorageProvider } from '@/lib/integrations/storage.ts';
 import { createArticlesRepository } from '@/modules/articles/articles.repository.ts';
 import {
   CreateArticleBodySchema,
@@ -201,11 +201,12 @@ describe.skipIf(!databaseUrl)('Audit regressions against real local PostgreSQL',
         .where(eq(schema.mediaUploads.id, uploadId));
       const entered = Promise.withResolvers<undefined>();
       const release = Promise.withResolvers<undefined>();
-      const attachment = withMediaMutation(db, 'articles', async (tx) => {
+      const raceArticleId = generateId();
+      const attachment = withMediaMutation(db, 'articles', raceArticleId, async (tx) => {
         const [row] = await tx
           .insert(schema.articles)
           .values({
-            id: generateId(),
+            id: raceArticleId,
             authorId: actor.id,
             title: 'Race article',
             slug: generateId(),
@@ -319,6 +320,69 @@ describe.skipIf(!databaseUrl)('Audit regressions against real local PostgreSQL',
       );
       expect(rls).toHaveLength(2);
       expect(rls.every((r) => r.rowsecurity)).toBe(true);
+    });
+  });
+
+  test('resolves relation summaries through real SQL joins', async () => {
+    await withFixture(async ({ db, actor, productId, categoryId, reviewers }) => {
+      const parentCategoryId = generateId();
+      const childCategoryId = generateId();
+      const articleId = generateId();
+      const reviewId = generateId();
+      try {
+        await db.insert(schema.categories).values([
+          { id: parentCategoryId, name: 'Join parent', slug: parentCategoryId },
+          {
+            id: childCategoryId,
+            parentId: parentCategoryId,
+            name: 'Join child',
+            slug: childCategoryId,
+          },
+        ]);
+        await db.insert(schema.articles).values({
+          id: articleId,
+          authorId: actor.id,
+          title: 'Join article',
+          slug: articleId,
+          contentMd: 'Body',
+        });
+        const reviewer = reviewers[0];
+        if (reviewer === undefined) throw new Error('Missing reviewer fixture');
+        await db.insert(schema.productReviews).values({
+          id: reviewId,
+          productId,
+          userId: reviewer,
+          rating: 5,
+        });
+
+        const child = await createCatalogRepository(db).findById(childCategoryId);
+        expect(child?.parentId).toBe(parentCategoryId);
+        expect(child?.parentName).toBe('Join parent');
+        expect(child?.parentSlug).toBe(parentCategoryId);
+
+        const [card] = await createProductsRepository(db).findActiveCardsByIds([productId]);
+        expect(card?.categoryId).toBe(categoryId);
+        expect(card?.categoryName).toBe('Audit category');
+        expect(card?.categorySlug).toBe(categoryId);
+
+        const article = await createArticlesRepository(db).findById(articleId);
+        expect(article?.authorName).toBe('Integration User');
+
+        const [review] = await createReviewsRepository(db).listPublishedByProductCursor({
+          productId,
+          limit: 5,
+        });
+        expect(review?.productId).toBe(productId);
+        expect(review?.productName).toBe('Audit product');
+        expect(review?.productSlug).toBe(productId);
+        expect(review?.authorName).toBe('Integration User');
+      } finally {
+        await db.delete(schema.productReviews).where(eq(schema.productReviews.id, reviewId));
+        await db.delete(schema.articles).where(eq(schema.articles.id, articleId));
+        await db
+          .delete(schema.categories)
+          .where(inArray(schema.categories.id, [childCategoryId, parentCategoryId]));
+      }
     });
   });
 });
